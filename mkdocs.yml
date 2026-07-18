@@ -1,0 +1,56 @@
+# MkDocs configuration for the Matrikelhelfer user manual site.
+# Only docs/Manual is published; everything else under docs/ stays
+# repo-internal. Not yet deployed anywhere (no GitHub Actions workflow) —
+# scaffolded so it can be built/previewed locally with `mkdocs serve`, and
+# wired up to a real deploy once/if this app ships beyond personal use.
+
+site_name: Matrikelhelfer
+site_description: Handbuch für Matrikelhelfer – Quellen- und Zitatangaben aus Online-Kirchenbüchern (Matricula Online, DFG-Viewer)
+repo_url: https://github.com/luni64/Matrikelhelfer
+repo_name: luni64/Matrikelhelfer
+edit_uri: ""
+
+docs_dir: docs/Manual
+
+nav:
+  - Handbuch: index.md
+  - Changelog: CHANGELOG.md
+
+theme:
+  name: material
+  language: de
+  features:
+    - navigation.top
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      toggle:
+        icon: material/brightness-7
+        name: Dunkles Design
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      toggle:
+        icon: material/brightness-4
+        name: Helles Design
+
+plugins:
+  - search:
+      lang:
+        - de
+        - en
+
+markdown_extensions:
+  - attr_list
+  # Generate heading anchors the same way GitHub does (keep umlauts and
+  # leading chapter numbers), so the manual's cross-reference links (e.g.
+  # "siehe Kapitel 6") work identically on the site and in the GitHub
+  # file view - same setup as AutoNum's manual.
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower

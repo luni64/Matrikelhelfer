@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Matricula Helper</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>Matricula Helper</h1>
+
+  <section>
+    <h2>Aktuelles Zitat</h2>
+    <pre id="current" class="citation">Noch keine Matricula-Seite erkannt.</pre>
+    <div class="buttons">
+      <button id="save" disabled>Merken</button>
+      <button id="copy" disabled>Kopieren</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Gemerkte Zitate</h2>
+    <ul id="saved" class="saved-list"></ul>
+    <pre id="detail" class="citation" hidden></pre>
+  </section>
+
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

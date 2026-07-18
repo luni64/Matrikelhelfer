@@ -1,0 +1,62 @@
+<UserControl x:Class="Matrikelhelfer.Views.CopyableField"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+             xmlns:iconPacks="http://metro.mahapps.com/winfx/xaml/iconpacks"
+             x:Name="Root">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </UserControl.Resources>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <!-- The label lives as a floating watermark instead of a separate
+             column - shrinks to a small caption once there's a value,
+             shows full-size as placeholder text when empty. Saves the
+             horizontal space a dedicated label column used to take. -->
+        <!-- The inner Text binding is TwoWay so an editable field's typing
+             reaches the Value DP; for read-only fields nothing is ever
+             pushed, and whether an edit reaches the ViewModel is decided by
+             the OUTER Value binding's mode (OneWay by default for a plain
+             DP, so read-only fields bound to private-setter properties stay
+             safe). -->
+        <!-- The WarnWhenEmpty red border is applied from code-behind as a
+             LOCAL BorderBrush value (UpdateWarnBorder) - a style trigger
+             loses against the MahApps template/style triggers, a local
+             value doesn't. -->
+        <TextBox x:Name="ValueBox" Grid.Column="0" VerticalAlignment="Center"
+                  IsReadOnly="{Binding IsValueReadOnly, ElementName=Root}"
+                  Padding="6,5" Margin="0,0,6,0"
+                  TextWrapping="{Binding ValueWrapping, ElementName=Root}"
+                  mah:TextBoxHelper.Watermark="{Binding Label, ElementName=Root}"
+                  mah:TextBoxHelper.UseFloatingWatermark="True"
+                  ToolTip="{Binding Value, ElementName=Root}"
+                  Text="{Binding Value, ElementName=Root, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+        <!-- Optional extra action (e.g. "save image to disk", "open URL in
+             browser") sits BEFORE the copy button, not after, so the copy
+             button is always the rightmost element regardless of whether
+             this one is shown - keeping every field's copy button aligned
+             to the same column. -->
+        <Button Grid.Column="1" Width="30" Height="30" Padding="0" Margin="0,0,2,0"
+                VerticalAlignment="Center"
+                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                ToolTip="{Binding ExtraTooltip, ElementName=Root}"
+                Visibility="{Binding ShowExtraButton, ElementName=Root, Converter={StaticResource BoolToVisibility}}"
+                Command="{Binding ExtraCommand, ElementName=Root}">
+            <iconPacks:PackIconFontAwesome6 Kind="{Binding ExtraIconKind, ElementName=Root}" Width="14" Height="14" />
+        </Button>
+
+        <Button Grid.Column="2" Width="30" Height="30" Padding="0"
+                VerticalAlignment="Center"
+                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                ToolTip="In die Zwischenablage kopieren"
+                Click="CopyButton_Click">
+            <iconPacks:PackIconFontAwesome6 Kind="CopySolid" Width="14" Height="14" />
+        </Button>
+    </Grid>
+</UserControl>

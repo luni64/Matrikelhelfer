@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<UseWPF>true</UseWPF>
+		<Nullable>enable</Nullable>
+		<AssemblyName>Matrikelhelfer</AssemblyName>
+		<RootNamespace>Matrikelhelfer</RootNamespace>
+		<Product>Matrikelhelfer</Product>
+		<Authors>luni64</Authors>
+		<Description>Quellen- und Zitatangaben aus Online-Kirchenbüchern (Matricula Online, DFG-Viewer)</Description>
+		<Copyright>Copyright (c) 2026 luni64</Copyright>
+		<!-- Single source for the app version; the installer version in
+		     installer\setup.iss is still bumped separately at release time. -->
+		<Version>0.1.0</Version>
+		<!-- Pin the runtime so publish output only contains win-x64 natives
+		     instead of also copying win-x86/arm64/linux/osx variants. -->
+		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
+		<SelfContained>false</SelfContained>
+	</PropertyGroup>
+	<ItemGroup>
+	  <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
+	  <PackageReference Include="MahApps.Metro" Version="2.4.10" />
+	  <PackageReference Include="MahApps.Metro.IconPacks.FontAwesome6" Version="6.2.0" />
+	  <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+	</ItemGroup>
+</Project>

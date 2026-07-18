@@ -1,0 +1,17 @@
+# Build artifacts
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Claude Code local settings (machine-specific, not shared)
+.claude/settings.local.json
+
+# Personal editor preferences (machine-specific, not shared)
+.vscode/settings.json
+
+# MkDocs build output
+/site/

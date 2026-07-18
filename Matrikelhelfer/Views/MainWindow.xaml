@@ -1,0 +1,366 @@
+<mah:MetroWindow x:Class="Matrikelhelfer.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+        xmlns:iconPacks="http://metro.mahapps.com/winfx/xaml/iconpacks"
+        xmlns:views="clr-namespace:Matrikelhelfer.Views"
+        Title="Matrikelhelfer" Height="800" Width="600"
+        GlowBrush="{DynamicResource MahApps.Brushes.Accent}">
+    <mah:MetroWindow.Resources>
+        <!-- Shared section-heading look: sourced entirely from MahApps theme
+             resources (DynamicResource) rather than hardcoded colors/fonts, so
+             a future accent/theme change re-colors every heading automatically. -->
+        <Style x:Key="SectionHeadingStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MahApps.Brushes.Accent}" />
+            <!-- MahApps.Fonts.Family.Header is "Segoe UI Light, ..." - a family
+                 string that pins a specific Light-weight face, so a FontWeight
+                 setter on top of it is largely ignored by WPF's font-face
+                 resolution. Family.Control is weight-neutral, so SemiBold
+                 actually renders bold. -->
+            <Setter Property="FontFamily" Value="{DynamicResource MahApps.Fonts.Family.Control}" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <views:CitationPreviewConverter x:Key="CitationPreviewConverter" />
+        <!-- Shared item template for the format dropdowns: [format name /
+             rendered preview]. WPF's SelectionBoxItemTemplate behavior makes
+             the closed box show the same, so the field always displays the
+             actual rendered text. Without an explicit width, a wrapping
+             TextBlock doesn't wrap until it runs out of room to grow into,
+             so the whole dropdown would balloon to fit the unwrapped text -
+             binding to the ComboBox's own ActualWidth keeps every item (and
+             the popup itself) the same width as the closed box. -->
+        <DataTemplate x:Key="FormatPreviewTemplate">
+            <StackPanel Margin="2"
+                        Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ComboBox}}">
+                <!-- "Quelle (German - short)" instead of the bare format
+                     name: the name alone doesn't tell WHICH of the two
+                     dropdowns this is. The kind prefix comes from the
+                     ComboBox's Tag so the template stays shared. -->
+                <TextBlock Foreground="Gray" FontSize="11" Margin="0,0,0,4">
+                    <TextBlock.Text>
+                        <MultiBinding StringFormat="{}{0} ({1})">
+                            <Binding Path="Tag" RelativeSource="{RelativeSource AncestorType=ComboBox}" />
+                            <Binding Path="Name" />
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
+                <TextBlock TextWrapping="Wrap">
+                    <TextBlock.Text>
+                        <MultiBinding Converter="{StaticResource CitationPreviewConverter}">
+                            <Binding Path="." />
+                            <Binding Path="DataContext.DisplayedInfo"
+                                     RelativeSource="{RelativeSource AncestorType=ComboBox}" />
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
+            </StackPanel>
+        </DataTemplate>
+        <!-- Strips the default ComboBoxItem chrome so the custom content
+             isn't fighting a selection-highlight rectangle. -->
+        <Style x:Key="FormatComboItemStyle" TargetType="{x:Type ComboBoxItem}">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+                        <Border x:Name="Bd" Background="Transparent"
+                                BorderBrush="#E0E0E0" BorderThickness="0,0,0,1"
+                                Padding="10,8">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#F0F0F0" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </mah:MetroWindow.Resources>
+
+    <!-- Settings lives in the title bar (MahApps window commands) - it is
+         app-level configuration, not part of the citation workflow row. -->
+    <mah:MetroWindow.RightWindowCommands>
+        <mah:WindowCommands>
+            <Button Command="{Binding OpenSettingsCommand}" ToolTip="Einstellungen">
+                <iconPacks:PackIconFontAwesome6 Width="14" Height="14" Kind="GearSolid" />
+            </Button>
+        </mah:WindowCommands>
+    </mah:MetroWindow.RightWindowCommands>
+    <!-- Root: main content plus a DOCKED saved-entries panel (replaces the
+         earlier overlay Flyout, which hid the fields while open). The panel
+         column is 0-width while closed; the list button toggles it to a
+         fixed width and widens the WINDOW by the same amount (code-behind,
+         UpdateEntriesPanel), so the fields keep their size and both are
+         visible side by side. -->
+    <Grid Margin="0,0,0,0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <!-- One-line status bar across the whole window (fields AND
+                 panel) - long texts get an ellipsis, the tooltip has the
+                 full message. -->
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <!-- MinWidth keeps the fields usable when the splitter is
+                 dragged far to the left. -->
+            <ColumnDefinition x:Name="ContentColumn" Width="*" MinWidth="420" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition x:Name="EntriesColumn" Width="0" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Row="1" Grid.ColumnSpan="3"
+                Background="{DynamicResource MahApps.Brushes.Gray10}"
+                BorderBrush="{DynamicResource MahApps.Brushes.Gray8}"
+                BorderThickness="0,1,0,0" Padding="15,4">
+            <TextBlock Text="{Binding StatusText}" Foreground="Firebrick"
+                       TextTrimming="CharacterEllipsis">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="ToolTip" Value="{Binding StatusText}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding StatusText}" Value="">
+                                <Setter Property="ToolTip" Value="{x:Null}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </Border>
+
+        <!-- Transparent (but still hit-testable) drag handle between fields
+             and panel; only visible while the panel is open. -->
+        <GridSplitter x:Name="EntriesSplitter" Grid.Column="1" Width="8" Margin="0,15"
+                      HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                      Background="Transparent" Visibility="Collapsed"
+                      DragCompleted="EntriesSplitter_DragCompleted" />
+
+        <!-- Saved finds - a flat, sortable DataGrid for now (the
+             Land/Bistum/Pfarrei/Buch tree comes later). Single click
+             redisplays an entry in the main fields, double-click
+             additionally drives the browser back to its scan, Entf/context
+             menu deletes. Default sort: newest first. Gray10 is MahApps'
+             subtlest neutral surface brush - theme-managed, so the "card"
+             tint survives light/dark/accent changes. -->
+        <Border x:Name="EntriesPanel" Grid.Column="2" Margin="0,15,15,15" Visibility="Collapsed"
+                Background="{DynamicResource MahApps.Brushes.Gray10}" CornerRadius="4" Padding="10">
+            <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <DockPanel LastChildFill="False">
+                <TextBlock DockPanel.Dock="Left" Text="Gespeicherte Einträge"
+                           Style="{StaticResource SectionHeadingStyle}" />
+                <Button DockPanel.Dock="Right" Style="{DynamicResource MahApps.Styles.Button.Circle}"
+                        Width="26" Height="26" Padding="0" VerticalAlignment="Top"
+                        Command="{Binding ExportEntriesCommand}"
+                        ToolTip="Einträge als CSV exportieren">
+                    <iconPacks:PackIconFontAwesome6 Width="13" Height="13" Kind="FileExportSolid" />
+                </Button>
+            </DockPanel>
+            <DataGrid x:Name="EntriesGrid" Grid.Row="1"
+                      ItemsSource="{Binding SavedEntries}"
+                      SelectedItem="{Binding SelectedSavedEntry, Mode=TwoWay}"
+                      AutoGenerateColumns="False" IsReadOnly="True"
+                      SelectionMode="Single" SelectionUnit="FullRow"
+                      GridLinesVisibility="Horizontal" HeadersVisibility="Column"
+                      MouseDoubleClick="EntriesGrid_MouseDoubleClick"
+                      PreviewMouseRightButtonDown="EntriesGrid_PreviewMouseRightButtonDown">
+                <DataGrid.InputBindings>
+                    <KeyBinding Key="Delete" Command="{Binding DeleteEntryCommand}" />
+                </DataGrid.InputBindings>
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Im Browser öffnen" Command="{Binding NavigateToEntryCommand}" />
+                        <MenuItem Header="Eintrag löschen" Command="{Binding DeleteEntryCommand}" />
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.RowStyle>
+                    <!-- The comment is shown as a row tooltip instead of a
+                         column - too long for the panel. -->
+                    <Style TargetType="DataGridRow" BasedOn="{StaticResource MahApps.Styles.DataGridRow}">
+                        <Setter Property="ToolTip" Value="{Binding Comment}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Comment}" Value="">
+                                <Setter Property="ToolTip" Value="{x:Null}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.RowStyle>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" />
+                    <DataGridTextColumn Header="Buch" Binding="{Binding Info.CitationTitle}" Width="*" />
+                    <DataGridTextColumn Header="Seite" Binding="{Binding Info.PageDescription}" Width="Auto" />
+                    <DataGridTextColumn Header="Gespeichert" Width="Auto" SortDirection="Descending"
+                                        Binding="{Binding Record.SavedAt, StringFormat='{}{0:dd.MM.yyyy}'}" />
+                </DataGrid.Columns>
+            </DataGrid>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="0" Margin="15" >
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Workflow buttons, left to right in usage order: connect, read.
+             Speichern sits on the right next to the list toggle - saving
+             and reviewing saved entries belong together. -->
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
+            <Button Style="{DynamicResource MahApps.Styles.Button.Circle}"
+                Width="40" Height="40" Padding="0" Margin="0,0,8,0"
+                Command="{Binding ToggleConnectionCommand}"
+                ToolTip="{Binding ConnectionStatusText}">
+                <iconPacks:PackIconFontAwesome6 Width="25" Height="25" Kind="PlugSolid">
+                    <iconPacks:PackIconFontAwesome6.Style>
+                        <Style TargetType="iconPacks:PackIconFontAwesome6">
+                            <Setter Property="Foreground" Value="Orange" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                    <Setter Property="Foreground" Value="Green" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </iconPacks:PackIconFontAwesome6.Style>
+                </iconPacks:PackIconFontAwesome6>
+            </Button>
+            <Button Style="{DynamicResource MahApps.Styles.Button.Circle}"
+                Width="40" Height="40" Padding="0"
+                Command="{Binding ReadCommand}"
+                ToolTip="Kirchenbuch-Seite aus dem Browser lesen">
+                <iconPacks:PackIconFontAwesome6 Width="22" Height="22" Kind="BookOpenReaderSolid" />
+            </Button>
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,8">
+            <Button Style="{DynamicResource MahApps.Styles.Button.Circle}"
+                Width="40" Height="40" Padding="0" Margin="0,0,8,0"
+                Command="{Binding SaveCommand}"
+                ToolTip="Eintrag speichern">
+                <iconPacks:PackIconFontAwesome6 Width="22" Height="22" Kind="FloppyDiskSolid" />
+            </Button>
+            <Button Style="{DynamicResource MahApps.Styles.Button.Circle}"
+                Width="40" Height="40" Padding="0"
+                Command="{Binding ToggleEntriesPanelCommand}"
+                ToolTip="Gespeicherte Einträge anzeigen">
+                <iconPacks:PackIconFontAwesome6 Width="22" Height="22" Kind="ListSolid" />
+            </Button>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Padding="0,0,6,0">
+        <StackPanel>
+            <!-- The find's annotation, saved together with the entry so
+                 interesting finds can be revisited later: the person found
+                 on this page (Name) plus free-text notes (Kommentar). Both
+                 cleared on every read. -->
+            <TextBlock Text="Notizen" Style="{StaticResource SectionHeadingStyle}" Margin="0,10,0,0" />
+            <TextBox Margin="0,0,0,8" Padding="6,5"
+                     mah:TextBoxHelper.Watermark="Name"
+                     mah:TextBoxHelper.UseFloatingWatermark="True"
+                     Text="{Binding NameText, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBox Margin="0,0,0,10" Padding="6,5" Height="60"
+                     AcceptsReturn="True" TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     mah:TextBoxHelper.Watermark="Kommentar"
+                     mah:TextBoxHelper.UseFloatingWatermark="True"
+                     Text="{Binding CommentText, UpdateSourceTrigger=PropertyChanged}" />
+
+            <TextBlock Text="Quelle" Style="{StaticResource SectionHeadingStyle}" Margin="0,10,0,0" />
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <views:CopyableField Grid.Column="0" Margin="0,0,10,0" Label="Bistum" Value="{Binding BistumText}" />
+                <views:CopyableField Grid.Column="1" Margin="10,0,0,0" Label="Pfarrei" Value="{Binding ParishText}" />
+            </Grid>
+
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <views:CopyableField Grid.Column="0" Margin="0,0,10,0" Label="Buchtyp" Value="{Binding BookText}" />
+                <views:CopyableField Grid.Column="1" Margin="10,0,0,0" Label="Signatur" Value="{Binding SignatureText}" />
+            </Grid>
+
+            <!-- The rendered source line for pasting into the genealogy
+                 software's source (book) record - dropdown switches between
+                 the user-defined source formats, each entry previewing its
+                 rendering of the current record. -->
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ComboBox Grid.Column="0" Margin="0,0,6,0" Tag="Quelle"
+                          ItemsSource="{Binding SourceFormats}"
+                          SelectedItem="{Binding SelectedSourceFormat}"
+                          ItemTemplate="{StaticResource FormatPreviewTemplate}"
+                          ItemContainerStyle="{StaticResource FormatComboItemStyle}" />
+                <Button Grid.Column="1" Width="30" Height="30" Padding="0"
+                        VerticalAlignment="Top"
+                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                        ToolTip="Quellenangabe in die Zwischenablage kopieren"
+                        Command="{Binding CopySourceCommand}">
+                    <iconPacks:PackIconFontAwesome6 Kind="CopySolid" Width="14" Height="14" />
+                </Button>
+            </Grid>
+
+            <TextBlock Text="Zitat" Style="{StaticResource SectionHeadingStyle}" Margin="0,10,0,0" />
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <!-- Seite is editable and starts empty on every read (the
+                     number parsed from the scan label rarely matches the
+                     real handwritten page number - no guessing); red border
+                     while still empty. -->
+                <views:CopyableField Grid.Column="0" Margin="0,0,10,0" Label="Seite"
+                                     IsValueReadOnly="False" WarnWhenEmpty="True"
+                                     Value="{Binding PageText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                <views:CopyableField Grid.Column="1" Margin="10,0,0,0" Label="Scan-ID" Value="{Binding PageIdText}" />
+            </Grid>
+
+            <!-- The rendered per-page citation line for pasting into the
+                 genealogy software's citation on the source above - dropdown
+                 switches between the user-defined citation formats. -->
+            <Grid Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ComboBox Grid.Column="0" Margin="0,0,6,0" Tag="Zitat"
+                          ItemsSource="{Binding CitationFormats}"
+                          SelectedItem="{Binding SelectedCitationFormat}"
+                          ItemTemplate="{StaticResource FormatPreviewTemplate}"
+                          ItemContainerStyle="{StaticResource FormatComboItemStyle}" />
+                <Button Grid.Column="1" Width="30" Height="30" Padding="0"
+                        VerticalAlignment="Top"
+                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                        ToolTip="Zitatangabe in die Zwischenablage kopieren"
+                        Command="{Binding CopyCitationCommand}">
+                    <iconPacks:PackIconFontAwesome6 Kind="CopySolid" Width="14" Height="14" />
+                </Button>
+            </Grid>
+
+            <TextBlock Text="Links" Style="{StaticResource SectionHeadingStyle}" Margin="0,10,0,0" />
+            <views:CopyableField Margin="0,0,0,10" Label="Link auf die Kirchenbuch-Seite" Value="{Binding UrlText}"
+                                  ShowExtraButton="True" ExtraCommand="{Binding OpenUrlCommand}"
+                                  ExtraIconKind="ArrowUpRightFromSquareSolid" ExtraTooltip="Im Browser öffnen" />
+            <views:CopyableField Label="Link auf die Bilddatei" Value="{Binding ImageUrlText}"
+                                  ShowExtraButton="True" ExtraCommand="{Binding SaveImageCommand}"
+                                  ExtraIconKind="DownloadSolid" ExtraTooltip="Auf Datenträger speichern..." />
+        </StackPanel>
+        </ScrollViewer>
+        </Grid>
+    </Grid>
+</mah:MetroWindow>

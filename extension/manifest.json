@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Matricula Helper",
+  "version": "0.1.0",
+  "description": "Zeigt Zitierinformationen für Matricula-Online-Kirchenbuchscans an und füllt Ancestrys Quellenangabe-Dialog automatisch aus.",
+  "permissions": ["storage", "clipboardWrite"],
+  "content_scripts": [
+    {
+      "matches": ["*://data.matricula-online.eu/*"],
+      "js": ["common.js", "matricula.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.ancestry.de/*",
+        "*://*.ancestry.com/*",
+        "*://*.ancestry.co.uk/*",
+        "*://*.ancestry.ca/*",
+        "*://*.ancestry.com.au/*"
+      ],
+      "js": ["common.js", "ancestry.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Matricula Helper"
+  },
+  "sidebar_action": {
+    "default_panel": "popup.html",
+    "default_title": "Matricula Helper"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "matricula-helper@luni64",
+      "strict_min_version": "109.0"
+    }
+  }
+}

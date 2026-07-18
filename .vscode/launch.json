@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Matrikelhelfer",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}\\Matrikelhelfer\\bin\\Debug\\net8.0-windows\\win-x64\\Matrikelhelfer.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}\\Matrikelhelfer",
+            "stopAtEntry": false,
+            "console": "internalConsole"
+        }
+    ]
+}
