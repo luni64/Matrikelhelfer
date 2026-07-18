@@ -1,11 +1,12 @@
-# MkDocs configuration for the Matrikelhelfer user manual site.
-# Only docs/Manual is published; everything else under docs/ stays
-# repo-internal. Not yet deployed anywhere (no GitHub Actions workflow) —
-# scaffolded so it can be built/previewed locally with `mkdocs serve`, and
-# wired up to a real deploy once/if this app ships beyond personal use.
+# MkDocs configuration for the Matrikelhelfer user manual site
+# (https://matrikelhelfer.niggl-schlagbauer.de/). Only docs/Manual is
+# published; everything else under docs/ stays repo-internal. Built and
+# deployed by .github/workflows/manual.yml on every push to main that touches
+# the manual. Preview locally with `mkdocs serve`.
 
 site_name: Matrikelhelfer
 site_description: Handbuch für Matrikelhelfer – Quellen- und Zitatangaben aus Online-Kirchenbüchern (Matricula Online, DFG-Viewer)
+site_url: https://matrikelhelfer.niggl-schlagbauer.de/
 repo_url: https://github.com/luni64/Matrikelhelfer
 repo_name: luni64/Matrikelhelfer
 edit_uri: ""
