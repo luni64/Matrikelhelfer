@@ -13,11 +13,19 @@
 		<!-- Single source for the app version; the installer version in
 		     installer\setup.iss is still bumped separately at release time. -->
 		<Version>0.1.0</Version>
+		<!-- Stamps the Win32 icon onto the exe (Explorer, taskbar, Start menu,
+		     installer shortcuts). The same file is embedded as a WPF resource
+		     below so the MetroWindow title bar can use it too. -->
+		<ApplicationIcon>Assets\Matrikelhelfer.ico</ApplicationIcon>
 		<!-- Pin the runtime so publish output only contains win-x64 natives
 		     instead of also copying win-x86/arm64/linux/osx variants. -->
 		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
 		<SelfContained>false</SelfContained>
 	</PropertyGroup>
+	<ItemGroup>
+	  <!-- Embedded so the MetroWindow title bar can reference it via Icon="…". -->
+	  <Resource Include="Assets\Matrikelhelfer.ico" />
+	</ItemGroup>
 	<ItemGroup>
 	  <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
 	  <PackageReference Include="MahApps.Metro" Version="2.4.10" />

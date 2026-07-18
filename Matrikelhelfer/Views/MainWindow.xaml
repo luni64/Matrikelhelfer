@@ -5,6 +5,7 @@
         xmlns:iconPacks="http://metro.mahapps.com/winfx/xaml/iconpacks"
         xmlns:views="clr-namespace:Matrikelhelfer.Views"
         Title="Matrikelhelfer" Height="800" Width="600"
+        Icon="pack://application:,,,/Assets/Matrikelhelfer.ico"
         GlowBrush="{DynamicResource MahApps.Brushes.Accent}">
     <mah:MetroWindow.Resources>
         <!-- Shared section-heading look: sourced entirely from MahApps theme

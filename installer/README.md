@@ -49,7 +49,10 @@ Before building the installer, update the version number at the top of `setup.is
 
 ...and keep it in sync with `<Version>` in `Matrikelhelfer\Matrikelhelfer.csproj`.
 
+## App icon
+
+The app icon (`Matrikelhelfer\Assets\Matrikelhelfer.ico`, an open church register) is wired up: `<ApplicationIcon>` in `Matrikelhelfer.csproj` stamps it onto the exe (so Explorer/Start-menu/desktop shortcuts inherit it), and `SetupIconFile` in `setup.iss` gives the wizard and Add/Remove-Programs entry the same icon. No separate `[Files]` entry is needed — the shortcuts point at the exe.
+
 ## Not yet set up
 
-- **App icon**: no `.ico` exists yet, so the installer/exe use Inno Setup's/`.` default icon. Once one exists, add `ApplicationIcon` to `Matrikelhelfer.csproj` and `SetupIconFile`/an icon `[Files]` entry here, matching how AutoNum does it.
 - **License files**: no `LICENSE.txt`/`THIRD_PARTY_LICENCES.md` exist yet (this is a private repo). Add `[Files]` entries copying them into `{app}\licenses` once they exist.

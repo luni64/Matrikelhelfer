@@ -58,6 +58,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#MyAppExeName}
 DisableProgramGroupPage=yes
+; Wizard / Add-Remove-Programs icon. The exe already carries this same icon
+; via <ApplicationIcon> in the csproj, so the installed shortcuts are covered.
+SetupIconFile={#SourcePath}\..\Matrikelhelfer\Assets\Matrikelhelfer.ico
 ; Required so the dependency installer can elevate if needed
 PrivilegesRequiredOverridesAllowed=dialog
 

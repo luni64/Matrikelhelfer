@@ -2,6 +2,7 @@
 
 ## Features
 
+- App icon: an open church register (Matrikelbuch) in oxblood/parchment with an ink-blue quotation mark. Multi-resolution `.ico` (16–256 px) at `Matrikelhelfer/Assets/Matrikelhelfer.ico`, wired to the exe (`<ApplicationIcon>`), the MetroWindow title bar, and the installer wizard (`SetupIconFile`).
 - Selecting a saved entry now also navigates the tracked browser tab back to that entry's URL.
 - Main window fields are now grouped under "Quelle", "Zitat" and "Links" section headings for clearer visual structure.
 - Main window UI text translated to German.
