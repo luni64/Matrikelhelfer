@@ -46,20 +46,29 @@ Build it in a temp/scratch location — it must not be committed.
 
 ## 5. Signed installer
 
-`setup.iss` signs via the Inno Setup sign-tool profile **`certum`** (already
-configured in the Inno IDE on this machine — same profile used for AutoNum).
-IDE builds sign automatically; for command-line builds pass the command via
-`/S`. The signtool path must be converted to its 8.3 short path, because an
-embedded quoted path breaks ISCC's argument parsing:
+The installer is signed with the Certum **"Open Source Developer"**
+code-signing certificate, which **Certum SimplySign Desktop** exposes as a
+virtual smart card — it must be **running and logged in** so the cert
+(thumbprint `7e323a2cb437fe624d04be8129a29d7470d7f4f9`) is in the current
+user's certificate store.
+
+The signer itself is Microsoft's `signtool.exe`. This machine has no
+system-wide Windows SDK, so signtool comes from the
+`Microsoft.Windows.SDK.BuildTools` NuGet package — restored once into the
+global NuGet cache via the committed helper project:
 
 ```powershell
-$st  = (Get-ItemProperty "HKCU:\Software\Jordan Russell\Inno Setup\SignTools").SignTool0
-$cmd = $st.Substring($st.IndexOf('=') + 1)
-if ($cmd -match '^"([^"]+)"\s+(.*)$') {
-    $fso = New-Object -ComObject Scripting.FileSystemObject
-    $cmd = "$($fso.GetFile($Matches[1]).ShortPath) $($Matches[2])"
-}
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /Q "/Scertum=$cmd" installer\setup.iss
+dotnet restore installer\signtool.proj    # one-time (or to refresh signtool)
+
+# newest x64 signtool from the NuGet cache
+$st = Get-ChildItem "$env:USERPROFILE\.nuget\packages\microsoft.windows.sdk.buildtools" `
+        -Recurse -Filter signtool.exe |
+      Where-Object { $_.FullName -match '\\x64\\' } |
+      Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+
+# setup.iss has `SignTool=certum $f`; /Scertum supplies that tool's command inline.
+$cmd = "$st sign /sha1 7e323a2cb437fe624d04be8129a29d7470d7f4f9 /td sha256 /fd sha256 /tr http://time.certum.pl /v `$f"
+& "C:\Program Files\Inno Setup 7\ISCC.exe" /Q "/Scertum=$cmd" installer\setup.iss
 ```
 
 Output: `installer\bin\Matrikelhelfer-X.Y.Z-Setup.exe`. Verify the signature:
@@ -68,7 +77,14 @@ Output: `installer\bin\Matrikelhelfer-X.Y.Z-Setup.exe`. Verify the signature:
 (Get-AuthenticodeSignature installer\bin\Matrikelhelfer-X.Y.Z-Setup.exe).Status   # must be "Valid"
 ```
 
-Note: if the Certum key needs a PIN, a prompt may appear during signing.
+Notes:
+- SimplySign Desktop may pop a PIN prompt during signing.
+- If signtool's path ever contains spaces, ISCC's arg parser needs it as an
+  8.3 short path (`(New-Object -ComObject Scripting.FileSystemObject).GetFile($st).ShortPath`);
+  the NuGet cache path has none.
+- No Inno IDE sign-tool profile is needed — `/Scertum=<cmd>` defines it for
+  the compile. (The old approach read the command from the Inno registry
+  `SignTools\SignTool0`; that profile isn't required with this method.)
 
 ## 6. Commit, push, draft release
 

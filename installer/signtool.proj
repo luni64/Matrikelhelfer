@@ -1,0 +1,20 @@
+<!-- Restore-only helper: pulls Microsoft's signtool.exe (via the Windows SDK
+     build-tools NuGet package) into the global NuGet cache, so the release
+     process can sign the installer WITHOUT a system-wide Windows SDK install.
+
+       dotnet restore installer\signtool.proj
+
+     signtool then lives at (newest x64 build wins):
+       %USERPROFILE%\.nuget\packages\microsoft.windows.sdk.buildtools\<ver>\bin\<sdkver>\x64\signtool.exe
+
+     Not part of Matrikelhelfer.slnx; never built or shipped. Bump the package
+     version to refresh signtool. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
+  </ItemGroup>
+</Project>
