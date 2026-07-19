@@ -111,8 +111,10 @@ Notes:
 
 1. Commit the doc/version changes and push to `main`.
 2. Create a **draft** release (tag is only created when published, so nothing
-   is public yet). The repo is private, so the release is only visible to
-   accounts with repo access regardless of draft state:
+   is public yet). The repo is **public**, so a *published* release is visible
+   to everyone — a draft stays hidden until you publish it. For a pre-release
+   (beta/rc), add `--prerelease`; publish it later with `--prerelease` kept and
+   without `--latest`, so the stable release stays the "Latest" download:
 
 ```powershell
 gh release create vX.Y.Z --repo luni64/Matrikelhelfer --draft --target main `

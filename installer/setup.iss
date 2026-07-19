@@ -13,8 +13,11 @@
 #define SourceDir  "..\Matrikelhelfer\bin\Release\net8.0-windows\win-x64\publish"
 #define InstallerDir "."
 
-; Version — update manually before each release
-#define MyAppVersion "1.0.0"
+; Version — update manually before each release. MyAppVersion is the display
+; version (may carry a pre-release suffix); MyAppVersionInfo is the numeric
+; file-version resource (VersionInfoVersion requires x.x.x.x).
+#define MyAppVersion "1.1.0-beta.1"
+#define MyAppVersionInfo "1.1.0.0"
 
 ; Generate WHATS_NEW.txt from template with version substituted at compile time
 #define WhatsNewTemplate SourcePath + "\WHATS_NEW.template"
@@ -37,6 +40,7 @@ SignedUninstaller=yes
 AppId={{3D88B1A1-F017-4A05-907F-5A39956E5376}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersionInfo}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}

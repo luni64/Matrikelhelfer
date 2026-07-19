@@ -26,9 +26,16 @@ public partial class MainWindow : MetroWindow
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
 
-        // Single-sourced from <Version> in the csproj; ToString(3) drops
-        // the assembly version's always-zero fourth part.
-        Title = $"Matrikelhelfer v{Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)}";
+        // Single-sourced from <Version> in the csproj. InformationalVersion
+        // keeps any pre-release suffix ("1.1.0-beta.1"), which the numeric
+        // AssemblyVersion drops - important so a beta tester reports the exact
+        // build. The SDK may append "+<gitsha>"; take the part before it.
+        var informational = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        string version = informational?.Split('+')[0]
+            ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)
+            ?? "?";
+        Title = $"Matrikelhelfer v{version}";
 
         // Newest first by default; the SortDirection on the "Gespeichert"
         // column only draws the header arrow - the actual sort needs a

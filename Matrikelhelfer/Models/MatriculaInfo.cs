@@ -18,8 +18,16 @@ namespace Matrikelhelfer.Models;
 record MatriculaInfo(
     string Land, string Bistum, string Pfarrei, string Buchtyp, string DatumVon, string DatumBis,
     string Signatur, int Scan, string? Page, string ScanLabel, string Url, string ImageUrl,
-    string SignaturPfarrei = "", string SignaturBuch = "")
+    string SignaturPfarrei = "", string SignaturBuch = "", string PageUrl = "")
 {
+    // The page-specific link, when the provider offers one distinct from Url.
+    // For Matricula/DFG the address-bar Url already IS the page (it carries the
+    // scan number), so this stays empty and callers fall back to Url. For
+    // ARCHION the Url identifies only the book (the page lives in client-side
+    // viewer state); PageUrl holds the page permalink when it could be read.
+    [JsonIgnore]
+    public string EffectivePageUrl => string.IsNullOrEmpty(PageUrl) ? Url : PageUrl;
+
     // A short title identifying this book, e.g. "Titting Taufen 1599-1625" -
     // book-level only (no scan/page reference, unlike the saved-entries list
     // display), matching genealogy convention where the "source" is the book
@@ -34,10 +42,14 @@ record MatriculaInfo(
     public string BookLabel => $"{Buchtyp} {ExtractYear(DatumVon)}-{ExtractYear(DatumBis)}";
 
     // "285 (Scan 7)" or "Scan 7" if the priest-written page number wasn't
-    // parseable - matches the on-screen "Page ..." line.
+    // parseable - matches the on-screen "Page ..." line. Scan == 0 means the
+    // provider gives no sequential scan number (ARCHION: the page lives in
+    // client-side viewer state, not the URL) - then show only the page, if any.
     [JsonIgnore]
     public string PageDescription =>
-        Page != null ? $"{Page} (Scan {Scan})" : $"Scan {Scan}";
+        Scan > 0
+            ? (Page != null ? $"{Page} (Scan {Scan})" : $"Scan {Scan}")
+            : (Page ?? "");
 
     // Url without the page-position parameters - links the book, not the
     // specific scan. Only the page params (Matricula's ?pg=, the DFG
@@ -64,6 +76,7 @@ record MatriculaInfo(
         param.StartsWith("pg=") ||
         param.StartsWith("tx_dlf[page]=") ||
         param.StartsWith("tx_dlf%5Bpage%5D=", StringComparison.OrdinalIgnoreCase) ||
+        param.StartsWith("pageId=", StringComparison.OrdinalIgnoreCase) ||
         param.StartsWith("cHash=", StringComparison.OrdinalIgnoreCase);
 
     // The site's dates are spelled-out German ("31. Dezember 1625"), always

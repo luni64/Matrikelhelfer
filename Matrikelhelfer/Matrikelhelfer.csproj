@@ -12,7 +12,7 @@
 		<Copyright>Copyright (c) 2026 luni64</Copyright>
 		<!-- Single source for the app version; the installer version in
 		     installer\setup.iss is still bumped separately at release time. -->
-		<Version>1.0.0</Version>
+		<Version>1.1.0-beta.1</Version>
 		<!-- Stamps the Win32 icon onto the exe (Explorer, taskbar, Start menu,
 		     installer shortcuts). The same file is embedded as a WPF resource
 		     below so the MetroWindow title bar can use it too. -->

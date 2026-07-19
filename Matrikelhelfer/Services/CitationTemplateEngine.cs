@@ -84,8 +84,10 @@ static class CitationTemplateEngine
             // user-confirmed handwritten page number, and a citation must
             // not silently pass a scan index off as a page.
             ["Seite"] = info.Page ?? "",
-            ["Scan-Nr"] = info.Scan.ToString(),
-            ["PageUrl"] = info.Url,
+            // Scan == 0 = provider has no sequential scan number (ARCHION) -
+            // render empty rather than a misleading "0", same spirit as Seite.
+            ["Scan-Nr"] = info.Scan > 0 ? info.Scan.ToString() : "",
+            ["PageUrl"] = info.EffectivePageUrl,
             ["BookUrl"] = info.BookUrl,
             ["ImageUrl"] = info.ImageUrl,
             ["Scan-ID"] = info.ScanLabel,

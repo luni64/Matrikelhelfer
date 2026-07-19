@@ -51,8 +51,12 @@ class MatriculaExtractor : ICitationExtractor
 
     public bool CanHandle(Uri url) => url.Host.Equals(Host, StringComparison.OrdinalIgnoreCase);
 
-    public async Task<MatriculaInfo?> GetInfoAsync(Uri uri)
+    // Only the URL is used: Matricula's citation data is all in the server-
+    // rendered HTML this extractor fetches (the context's title/link lookup
+    // are for login-gated providers).
+    public async Task<MatriculaInfo?> GetInfoAsync(PageContext context)
     {
+        Uri uri = context.Url;
         string path = uri.AbsolutePath;
 
         int pg = 1;

@@ -21,7 +21,8 @@ class MainViewModel : INotifyPropertyChanged
     // the matching one via CanHandle. Adding a provider = one new
     // ICitationExtractor class plus one entry here (same pattern as the
     // per-browser address-bar locators).
-    readonly ICitationExtractor[] _extractors = [new MatriculaExtractor(), new DfgViewerExtractor()];
+    readonly ICitationExtractor[] _extractors =
+        [new MatriculaExtractor(), new DfgViewerExtractor(), new ArchionExtractor()];
 
     MatriculaInfo? _currentInfo;
 
@@ -276,7 +277,9 @@ class MainViewModel : INotifyPropertyChanged
     {
         if (SelectedSavedEntry != null)
         {
-            NavigateTo(SelectedSavedEntry.Info.Url);
+            // Prefer the page-specific link (ARCHION permalink) so a saved
+            // entry reopens the exact page, not just the book.
+            NavigateTo(SelectedSavedEntry.Info.EffectivePageUrl);
         }
     }
 
@@ -523,9 +526,15 @@ class MainViewModel : INotifyPropertyChanged
         var extractor = uri is null ? null : _extractors.FirstOrDefault(e => e.CanHandle(uri));
         if (extractor is not null)
         {
+            // The context bundles what a provider may need beyond the URL: the
+            // logged-in tab title (ARCHION's data is there, not in a cookie-less
+            // fetch) and an on-demand page-link lookup in the rendered page
+            // (ARCHION's permalink). Most extractors use only the URL.
+            var page = new PageContext(uri!, _connection.ReadActiveTabTitle(),
+                                       _connection.FindPageLinkMatching);
             try
             {
-                info = await extractor.GetInfoAsync(uri!);
+                info = await extractor.GetInfoAsync(page);
             }
             catch (Exception ex)
             {
@@ -776,7 +785,10 @@ class MainViewModel : INotifyPropertyChanged
             SignatureText = info.Signatur;
             PageText = info.Page ?? "";
             PageIdText = info.ScanLabel;
-            UrlText = info.Url;
+            // The page link prefers a provider-supplied page-specific URL
+            // (ARCHION's permalink) over the address-bar URL (which there is
+            // only the book); for Matricula/DFG they are the same.
+            UrlText = info.EffectivePageUrl;
             ImageUrlText = info.ImageUrl;
             SourceText = CitationTemplateEngine.Render(_selectedSourceFormat, info);
             PageCitationText = CitationTemplateEngine.Render(_selectedCitationFormat, info);

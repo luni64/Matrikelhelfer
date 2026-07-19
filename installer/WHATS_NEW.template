@@ -1,11 +1,14 @@
 Matrikelhelfer ${VERSION} - Was ist neu
 =========================================
 
-Erste oeffentliche Version von Matrikelhelfer.
+Beta-Vorabversion. Neu gegenueber 1.0.0:
 
 Neu
 ---
-- Liest die Zitatangaben der aktuell im Browser angezeigten Kirchenbuch-Seite aus: Matricula Online und DFG-Viewer-Archive (derzeit das Digitale Archiv des Erzbistums Muenchen und Freising). Der Anbieter wird automatisch an der Adresse erkannt.
-- Erzeugt fertige, mit einem Klick kopierbare Quellen- und Zitatangaben in frei definierbaren Formaten. Eigener Formateditor mit Platzhaltern und Datumsformaten (deutsch/englisch, GEDCOM, ISO).
-- Speichert Funde mit Name und Kommentar dauerhaft: wieder anzeigen, per Doppelklick erneut im Browser oeffnen, einzeln oder gesammelt loeschen, als CSV (deutsches Excel) exportieren.
-- Deutschsprachige Oberflaeche mit Feldsymbolen und gruppierten Abschnitten. Online-Handbuch ueber die Hilfe-Schaltflaeche in der Titelleiste.
+- ARCHION-Unterstuetzung (www.archion.de, evangelische Kirchenbuecher): Land, Archiv, Pfarrei, Buchtyp und Zeitraum werden automatisch aus der im Browser angemeldeten ARCHION-Seite uebernommen. Der Anbieter wird automatisch an der Adresse erkannt.
+- Experimentell: Ist im ARCHION-Viewer das Permalink-Feld geoeffnet, wird der genaue Seiten-Permalink (archion.de/p/...) als Seitenlink uebernommen; sonst der Buch-Link aus der Adresszeile.
+
+Hinweise
+--------
+- ARCHION liefert keine Bilddatei, keine Signatur und keine Scan-Nummer; die Seite tragen Sie wie gewohnt selbst ein.
+- Dies ist eine Beta zum Testen. Rueckmeldungen zu ARCHION - besonders von Nutzern evangelischer Kirchenbuecher - sind ausdruecklich erwuenscht, bitte ueber die GitHub-Seite.

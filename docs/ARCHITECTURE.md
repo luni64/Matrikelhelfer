@@ -11,7 +11,7 @@ A Windows WPF desktop app (.NET 8, C# 12, MahApps.Metro, German UI) for genealog
 Matrikelhelfer/
 ├── App.xaml/.cs                 # StartupUri -> Views/MainWindow.xaml
 ├── Models/
-│   ├── MatriculaInfo.cs         # record: raw scraped citation fields (+ computed CitationTitle/BookLabel/BookUrl, [JsonIgnore])
+│   ├── MatriculaInfo.cs         # record: raw scraped citation fields (+ stored PageUrl; computed CitationTitle/BookLabel/BookUrl/EffectivePageUrl, [JsonIgnore])
 │   ├── CitationStyle.cs         # record: named format template (Name + Template string)
 │   └── SavedRecord.cs           # record: one persisted find (Id, SavedAt, Name, Comment, Info)
 ├── Browsers/                    # Per-browser address-bar lookup strategies
@@ -20,10 +20,11 @@ Matrikelhelfer/
 │   ├── ChromiumAddressBarLocator.cs  # Chrome/Edge/Brave/Opera/Vivaldi/IE
 │   └── FirefoxAddressBarLocator.cs
 ├── Services/
-│   ├── BrowserConnection.cs     # manual browser bridge: list/pick browser, read URL, drive navigation
-│   ├── ICitationExtractor.cs    # per-provider extraction strategy (CanHandle by URL)
+│   ├── BrowserConnection.cs     # manual browser bridge: list/pick browser, read URL+title, find page link, drive navigation
+│   ├── ICitationExtractor.cs    # per-provider extraction strategy (CanHandle by URL) + PageContext
 │   ├── MatriculaExtractor.cs    # Matricula provider: HTTP fetch + HTML parse + cache
 │   ├── DfgViewerExtractor.cs    # DFG-viewer (tx_dlf) provider: METS/MODS XML parse + cache
+│   ├── ArchionExtractor.cs      # ARCHION provider: parses the (login-gated) browser tab TITLE, no fetch
 │   ├── NativeInput.cs           # SendInput-based keyboard simulation (Ctrl+L / Enter re-navigation)
 │   ├── CitationTemplateEngine.cs # {Placeholder} template rendering over a MatriculaInfo
 │   ├── CitationStyleCatalog.cs  # built-in templates: first-start seeds + fixed defaults
@@ -65,7 +66,9 @@ Replaced the earlier `BrowserWatcher` (WinEventHook + UIA property-changed event
 Adding a browser = one new class plus one registration line.
 
 ### Provider extractors (`Services/ICitationExtractor`)
-Multiple church-book providers are supported through one strategy interface, mirroring the per-browser locator pattern: every provider yields the same `MatriculaInfo` shape and differs only in which site it understands and how the fields are scraped. `MainViewModel` holds the extractor list and routes by URL: `CanHandle(Uri)` (host check) picks the provider, then `GetInfoAsync(Uri)` scrapes; `DownloadImageAsync` is also per-provider (image fetches may need provider-specific headers) and is routed via the *displayed* record's stored page URL, so saved entries from any provider download correctly. Adding a provider = one new `ICitationExtractor` class plus one entry in `MainViewModel._extractors`.
+Multiple church-book providers are supported through one strategy interface, mirroring the per-browser locator pattern: every provider yields the same `MatriculaInfo` shape and differs only in which site it understands and how the fields are scraped. `MainViewModel` holds the extractor list and routes by URL: `CanHandle(Uri)` (host check) picks the provider, then `GetInfoAsync(PageContext)` scrapes; `DownloadImageAsync` is also per-provider (image fetches may need provider-specific headers) and is routed via the *displayed* record's stored page URL, so saved entries from any provider download correctly. Adding a provider = one new `ICitationExtractor` class plus one entry in `MainViewModel._extractors`.
+
+`GetInfoAsync` takes a **`PageContext`**, not a bare URL, because not every provider's data lives in fetchable HTML. It bundles: the address-bar `Url`; the browser tab `Title` (read via `BrowserConnection.ReadActiveTabTitle` — a Win32 `GetWindowText`); and `FindLink`, an on-demand lookup that walks the rendered page's UI-Automation tree for a link matching a provider-supplied regex (`BrowserConnection.FindPageLinkMatching`). Matricula/DFG use only `Url`; ARCHION needs the other two. `FindLink` is deliberately lazy (the a11y-tree scan is slow and fragile) so only the provider that needs it pays for it.
 
 **Address-bar display quirks**: browsers show URLs scheme-elided (no `https://`) *and* percent-decoded. `MainViewModel.TryParseBrowserUrl` normalizes before any extractor sees the URL: parse as-is and accept only an http(s) scheme, else prepend `https://` and re-parse. A naive `Contains("://")` scheme check is wrong — a scheme-elided DFG-viewer URL still contains a nested `://` inside its decoded `tx_dlf[id]` value (this exact bug shipped once).
 
@@ -102,6 +105,15 @@ Field mapping (XPath against the fetched HTML):
 **Book pages only**: a parish/diocese overview URL on the same host is rejected (null) by a **content** check — no viewer-widget `"labels"` and no `Signatur` table row means it's not a book page. Deliberately not a URL-depth check: how deep a country's hierarchy nests varies (e.g. Luxembourg).
 
 **Two-tier caching**: doc + labels + files are keyed on the URL path only. Page-turning (`?pg=` changes) recomputes scan fields with no network call; a fetch only happens when the path (book) changes.
+
+### ARCHION extraction (`Services/ArchionExtractor`)
+For church books on **archion.de** (the German Protestant *Kirchenbuchportal*). Unlike Matricula/DFG, ARCHION is subscription-only and even the citation **metadata is login-gated**: a cookie-less HTTP fetch of a real (paid) book returns a stripped page with no breadcrumb (only the free sample books are public). This extractor therefore **does not fetch**. Instead it parses the **browser tab title** (`PageContext.Title`), which mirrors the logged-in page's `<title>` and carries the whole breadcrumb chain, reversed:
+
+`Beerdigungsregister 1808-1840 | Bromskirchen | Dekanat Biedenkopf | Zentralarchiv … | Hessen: Kirchenbücher online mit ARCHION`
+
+The site name `Kirchenbücher online mit ARCHION` is the anchor (everything before it is the chain; the browser's own `" - <Browser>"` suffix after it is discarded, and its absence means "not an ARCHION book page" → null). The chain is mapped **from the ends** — Buch = first, Pfarrei = second, Archiv = second-last, Land = last — so the varying middle depth (a *Dekanat* in Hessen, a *Kirchenkreis* in Thüringen, sometimes none) doesn't matter. The book label ("… 1808-1840") yields Buchtyp + the date range. `{Land}` here is ARCHION's top level (a Bundesland/Landeskirche region), **not** the country as with Matricula/DFG.
+
+What ARCHION does *not* provide: no image URL (paywalled/session-bound — `DownloadImageAsync` throws, but is never reached since `ImageUrl` is empty), no archival signature, and no sequential scan number in the URL (`Scan = 0`; `{Scan-Nr}` and the list's `PageDescription` render empty at `Scan == 0` rather than "0"/"Scan 0"). The **page** is client-side viewer state, absent from the URL — so during normal browsing the address bar carries only the **book**, and `BookUrl` derives from it. The exact-page link is ARCHION's **permalink** (`archion.de/p/<code>`), shown only in the viewer's (user-opened) permalink panel and never in the URL; the extractor reads it via `PageContext.FindLink` (the UIA a11y-tree scan) and stores it in `MatriculaInfo.PageUrl`. `{PageUrl}`, the link field, and saved-entry re-navigation use `EffectivePageUrl` (= `PageUrl` if set, else `Url`), so a missing/closed panel degrades cleanly to the book URL. **This permalink read is experimental** — fragile (depends on the panel being open and on the browser exposing the link in its a11y tree) and comparatively slow (whole-window scan on the UI thread).
 
 ### Source/citation format system
 Genealogy software keeps *sources* (the church book) separate from *citations* on them (the page) — the app's two central fields mirror that split:

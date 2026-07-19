@@ -58,8 +58,11 @@ class DfgViewerExtractor : ICitationExtractor
     public async Task<byte[]> DownloadImageAsync(string imageUrl) =>
         await s_http.GetByteArrayAsync(imageUrl);
 
-    public async Task<MatriculaInfo?> GetInfoAsync(Uri uri)
+    // Only the URL is used: the DFG viewer's data comes from the METS XML that
+    // tx_dlf[id] points to, fetched by this extractor.
+    public async Task<MatriculaInfo?> GetInfoAsync(PageContext page)
     {
+        Uri uri = page.Url;
         var query = ParseQuery(uri.Query);
         if (!query.TryGetValue("tx_dlf[id]", out var metsUrl))
         {

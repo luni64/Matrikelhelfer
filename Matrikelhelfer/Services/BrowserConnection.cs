@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Automation;
@@ -50,6 +52,9 @@ class BrowserConnection
 
     [DllImport("user32.dll")]
     static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
     [DllImport("user32.dll")]
     static extern int GetWindowThreadProcessId(IntPtr hWnd, out int processId);
@@ -159,6 +164,104 @@ class BrowserConnection
         return addressBar.TryGetCurrentPattern(ValuePattern.Pattern, out object patternObj)
             ? ((ValuePattern)patternObj).Current.Value
             : null;
+    }
+
+    // The connected window's title = the active tab's page title, i.e. what
+    // the browser actually RENDERED - so it reflects the logged-in page,
+    // unlike this app's cookie-less HTTP fetch. Used by providers whose
+    // citation data isn't in the URL and whose page HTML is login-gated:
+    // ARCHION serves the breadcrumb only to a session, but puts that same
+    // chain in the <title>, which the window title mirrors. Synchronous, like
+    // ReadActiveTabUrl - a plain Win32 text read, no focus needed.
+    public string? ReadActiveTabTitle()
+    {
+        if (_connectedPid is not int pid)
+        {
+            return null;
+        }
+        var hwnd = FindTopWindowForPid(pid);
+        if (hwnd == IntPtr.Zero)
+        {
+            return null;
+        }
+        int len = GetWindowTextLength(hwnd);
+        if (len <= 0)
+        {
+            return null;
+        }
+        var sb = new StringBuilder(len + 1);
+        GetWindowText(hwnd, sb, sb.Capacity);
+        return sb.ToString();
+    }
+
+    // Walks the connected window's UI Automation tree for the first hyperlink
+    // or text field whose text matches `pattern`, returning the matched
+    // substring. Used to pull a link out of the RENDERED page that the URL
+    // never carries - ARCHION's page permalink, shown only in its (user-opened)
+    // permalink panel. Deliberately fragile and best-effort: it depends on the
+    // panel being open and on the browser exposing the link in its
+    // accessibility tree, and it is comparatively slow (a whole-window scan),
+    // so only call it when a provider genuinely needs it. Returns null on no
+    // match or any UIA error.
+    public string? FindPageLinkMatching(Regex pattern)
+    {
+        if (_connectedPid is not int pid)
+        {
+            return null;
+        }
+        var hwnd = FindTopWindowForPid(pid);
+        if (hwnd == IntPtr.Zero)
+        {
+            return null;
+        }
+        try
+        {
+            var root = AutomationElement.FromHandle(hwnd);
+            // Hyperlinks and edit fields only - a permalink is rendered as one
+            // or the other, and both are few per page (unlike generic Text,
+            // which every text node would swell into and slow the scan).
+            var condition = new OrCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Hyperlink),
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+            foreach (AutomationElement element in root.FindAll(TreeScope.Descendants, condition))
+            {
+                foreach (string candidate in ElementTexts(element))
+                {
+                    var match = pattern.Match(candidate);
+                    if (match.Success)
+                    {
+                        return match.Value;
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Best-effort automation of an external process: the window/tree
+            // may change under us, elements may go stale, etc.
+        }
+        return null;
+    }
+
+    // A link's URL shows up as the element's Name (hyperlinks) or its
+    // ValuePattern value (edit fields) depending on how the page renders it.
+    static IEnumerable<string> ElementTexts(AutomationElement element)
+    {
+        string? name = null;
+        try { name = element.Current.Name; } catch (ElementNotAvailableException) { }
+        if (!string.IsNullOrEmpty(name))
+        {
+            yield return name;
+        }
+        if (element.TryGetCurrentPattern(ValuePattern.Pattern, out object patternObj))
+        {
+            string? value = null;
+            try { value = ((ValuePattern)patternObj).Current.Value; } catch (ElementNotAvailableException) { }
+            if (!string.IsNullOrEmpty(value))
+            {
+                yield return value;
+            }
+        }
     }
 
     // Navigates the connected browser's active window to a URL in place:
