@@ -292,6 +292,7 @@ class MainViewModel : INotifyPropertyChanged
     public ICommand DeleteEntryCommand { get; }
     public ICommand NavigateToEntryCommand { get; }
     public ICommand ExportEntriesCommand { get; }
+    public ICommand ClearAllEntriesCommand { get; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -323,9 +324,16 @@ class MainViewModel : INotifyPropertyChanged
         CopyCitationCommand = new RelayCommand(
             () => Clipboard.SetText(PageCitationText), () => !string.IsNullOrEmpty(PageCitationText));
         ToggleEntriesPanelCommand = new RelayCommand(() => IsEntriesPanelOpen = !IsEntriesPanelOpen);
-        DeleteEntryCommand = new RelayCommand(DeleteSelectedEntry, () => SelectedSavedEntry != null);
+        // One command for all three delete affordances: the context menu and
+        // the Delete key pass no parameter (delete the selected row), while
+        // the inline trash button passes its OWN row - so it deletes that row
+        // without first having to select it.
+        DeleteEntryCommand = new RelayCommand<SavedEntry>(
+            entry => DeleteEntry(entry ?? SelectedSavedEntry),
+            entry => (entry ?? SelectedSavedEntry) != null);
         NavigateToEntryCommand = new RelayCommand(NavigateToSelectedEntry, () => SelectedSavedEntry != null);
         ExportEntriesCommand = new RelayCommand(ExportEntries, () => SavedEntries.Count > 0);
+        ClearAllEntriesCommand = new RelayCommand(ClearAllEntries, () => SavedEntries.Count > 0);
     }
 
     // "Does the current record+notes exactly match a saved entry?" - the
@@ -343,14 +351,54 @@ class MainViewModel : INotifyPropertyChanged
     bool IsDuplicateOfSaved() => _isDuplicateCached ??= SavedEntries.Any(e =>
         e.Info == _currentInfo && e.Name == NameText.Trim() && e.Comment == CommentText.Trim());
 
-    void DeleteSelectedEntry()
+    void DeleteEntry(SavedEntry? entry)
     {
-        if (SelectedSavedEntry == null)
+        if (entry == null)
         {
             return;
         }
-        SavedEntries.Remove(SelectedSavedEntry);
-        SetField(ref _selectedSavedEntry, null, nameof(SelectedSavedEntry));
+        // Was this the entry currently on display? (Selecting an entry makes
+        // it the selected one - see SelectedSavedEntry.)
+        bool wasDisplayed = ReferenceEquals(_selectedSavedEntry, entry);
+        SavedEntries.Remove(entry);
+        if (wasDisplayed)
+        {
+            // Drop the selection AND wipe the fields: otherwise the deleted
+            // entry's notes stay in Name/Kommentar/Seite with no matching
+            // saved entry, so the next list selection would pop the
+            // discard-unsaved warning. Deleting a DIFFERENT row (via its
+            // trash button) leaves the selection and display untouched.
+            SetField(ref _selectedSavedEntry, null, nameof(SelectedSavedEntry));
+            ClearDisplay();
+        }
+        InvalidateDuplicateCheck();
+        PersistEntries();
+    }
+
+    // Bulk delete, behind an explicit confirmation - this throws away every
+    // saved find, which can be years of research, so it must never happen on
+    // a single stray click.
+    void ClearAllEntries()
+    {
+        if (SavedEntries.Count == 0)
+        {
+            return;
+        }
+        if (MessageBox.Show(
+                "Wirklich ALLE gespeicherten Einträge löschen? Dies kann nicht rückgängig gemacht werden.",
+                "Alle Einträge löschen",
+                MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+        {
+            return;
+        }
+        SavedEntries.Clear();
+        // If a saved entry was on display, wipe the fields too (its notes
+        // would otherwise be orphaned); a fresh unsaved read stays untouched.
+        if (_selectedSavedEntry != null)
+        {
+            SetField(ref _selectedSavedEntry, null, nameof(SelectedSavedEntry));
+            ClearDisplay();
+        }
         InvalidateDuplicateCheck();
         PersistEntries();
     }
