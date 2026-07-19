@@ -33,6 +33,27 @@ natives — if a `runtimes\` folder with other RIDs appears, something regressed
 
 Smoke test: start `publish\Matrikelhelfer.exe`, confirm it detects a Matricula page, close it.
 
+### 3a. Sign the app binaries (before packaging)
+
+Sign **our own** binaries in the publish folder *before* zipping or building
+the installer — both packages copy from here, so signing once covers the
+portable exe **and** the installed exe (SmartScreen checks the launched exe,
+not just the setup). Third-party DLLs are already signed by their authors, so
+leave them alone. Uses the same signtool + Certum cert as the installer — see
+§5 for obtaining signtool and the SimplySign Desktop prerequisite:
+
+```powershell
+$pub = "Matrikelhelfer\bin\Release\net8.0-windows\win-x64\publish"
+$st  = Get-ChildItem "$env:USERPROFILE\.nuget\packages\microsoft.windows.sdk.buildtools" `
+         -Recurse -Filter signtool.exe |
+       Where-Object { $_.FullName -match '\\x64\\' } |
+       Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+& $st sign /sha1 7e323a2cb437fe624d04be8129a29d7470d7f4f9 /td sha256 /fd sha256 `
+    /tr http://time.certum.pl /v "$pub\Matrikelhelfer.exe" "$pub\Matrikelhelfer.dll"
+# verify
+Get-AuthenticodeSignature "$pub\Matrikelhelfer.exe","$pub\Matrikelhelfer.dll" | Select-Object Status, Path
+```
+
 ## 4. Release ZIP (portable version)
 
 Flat archive of the publish folder (no top-level directory):
