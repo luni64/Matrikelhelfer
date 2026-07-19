@@ -97,6 +97,9 @@
          app-level configuration, not part of the citation workflow row. -->
     <mah:MetroWindow.RightWindowCommands>
         <mah:WindowCommands>
+            <Button Command="{Binding HelpCommand}" ToolTip="Handbuch öffnen">
+                <iconPacks:PackIconFontAwesome6 Width="14" Height="14" Kind="CircleQuestionSolid" />
+            </Button>
             <Button Command="{Binding OpenSettingsCommand}" ToolTip="Einstellungen">
                 <iconPacks:PackIconFontAwesome6 Width="14" Height="14" Kind="GearSolid" />
             </Button>

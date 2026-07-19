@@ -288,6 +288,7 @@ class MainViewModel : INotifyPropertyChanged
     public ICommand CopySourceCommand { get; }
     public ICommand CopyCitationCommand { get; }
     public ICommand OpenSettingsCommand { get; }
+    public ICommand HelpCommand { get; }
     public ICommand ToggleEntriesPanelCommand { get; }
     public ICommand DeleteEntryCommand { get; }
     public ICommand NavigateToEntryCommand { get; }
@@ -319,6 +320,7 @@ class MainViewModel : INotifyPropertyChanged
         SaveImageCommand = new RelayCommand(SaveImage, () => !string.IsNullOrEmpty(ImageUrlText));
         OpenUrlCommand = new RelayCommand(() => NavigateTo(UrlText), () => !string.IsNullOrEmpty(UrlText));
         OpenSettingsCommand = new RelayCommand(OpenSettings);
+        HelpCommand = new RelayCommand(OpenManual);
         CopySourceCommand = new RelayCommand(
             () => Clipboard.SetText(SourceText), () => !string.IsNullOrEmpty(SourceText));
         CopyCitationCommand = new RelayCommand(
@@ -708,6 +710,24 @@ class MainViewModel : INotifyPropertyChanged
     }
 
     async void NavigateTo(string url) => await _connection.TryNavigateAsync(url);
+
+    // The published user manual (GitHub Pages). Opened in the user's DEFAULT
+    // browser via ShellExecute - independent of the on-demand connection to a
+    // church-book browser.
+    const string ManualUrl = "https://matrikelhelfer.niggl-schlagbauer.de/";
+
+    void OpenManual()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(ManualUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Handbuch konnte nicht geöffnet werden: {ex.Message}";
+        }
+    }
 
     void OpenSettings()
     {

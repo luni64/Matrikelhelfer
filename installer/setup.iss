@@ -14,7 +14,7 @@
 #define InstallerDir "."
 
 ; Version — update manually before each release
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.0.0"
 
 ; Generate WHATS_NEW.txt from template with version substituted at compile time
 #define WhatsNewTemplate SourcePath + "\WHATS_NEW.template"

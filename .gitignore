@@ -15,3 +15,6 @@
 
 # MkDocs build output
 /site/
+
+# Installer: generated from WHATS_NEW.template by ISCC at compile time
+/installer/WHATS_NEW.txt

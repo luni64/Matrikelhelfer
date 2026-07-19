@@ -2,8 +2,6 @@
 
 # Matrikelhelfer – Benutzerhandbuch
 
-> Dieses Handbuch ist in Arbeit – die App befindet sich noch in der Entwicklung. Screenshots folgen.
-
 ## 1. Einführung
 
 Matrikelhelfer unterstützt Sie bei der Ahnenforschung in Online-Kirchenbüchern. Während Sie im Browser einen Kirchenbuch-Scan betrachten, holt die App auf Knopfdruck alle Angaben, die Sie für eine saubere Quellenangabe brauchen:
@@ -69,7 +67,7 @@ Die Verbindung ist rein lesend und **auf Abruf**: Die App liest die Adresszeile 
 Wird der verbundene Browser geschlossen, erkennt die App das beim nächsten **Lesen** und zeigt es in der Statusleiste an; verbinden Sie sich dann einfach neu.
 
 ![Browser-Auswahl](Pictures/04_browserauswahl.png)
-<!-- Zeigt: Auswahlfenster mit laufenden Browsern samt Icons --> -->
+<!-- Zeigt: Auswahlfenster mit laufenden Browsern samt Icons --> 
 
 ---
 
@@ -231,7 +229,7 @@ Nein. Die App liest nur die Adresszeile des von Ihnen gewählten Browsers und l�
 
 ## 14. Installation
 
-Noch nicht als Download verfügbar – die App ist in Entwicklung und wird bisher aus dem Quellcode gebaut (siehe [Repository](https://github.com/luni64/Matrikelhelfer)). Geplant sind wie bei AutoNumber ein ZIP-Archiv (portabel) und ein Installer auf der GitHub-Releases-Seite.
+Matrikelhelfer ist auf der [GitHub-Releases-Seite](https://github.com/luni64/Matrikelhelfer/releases) erhältlich – wahlweise als **Installer** (`Matrikelhelfer-…-Setup.exe`) oder als **portables ZIP-Archiv**. Voraussetzung ist Windows 10/11 sowie die [.NET-8-Desktop-Runtime](https://dotnet.microsoft.com/download/dotnet/8.0); der Installer bietet ihre Einrichtung bei Bedarf automatisch an.
 
 ---
 
@@ -258,4 +256,4 @@ Noch nicht als Download verfügbar – die App ist in Entwicklung und wird bishe
 
 ---
 
-*Dieses Handbuch beschreibt Matrikelhelfer V0.1.0 (in Entwicklung). Screenshots und weitere Beispiele folgen.*
+*Dieses Handbuch beschreibt Matrikelhelfer V1.0.0.*

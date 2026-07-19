@@ -9,9 +9,9 @@ Findings can be annotated (name, comment) and saved permanently, so you can retu
 - [Matricula Online](https://data.matricula-online.eu) — church books from Germany, Austria, Luxembourg and more
 - **DFG-Viewer**-based archives (`tx_dlf`), currently the [Digital Archive of the Archdiocese of Munich and Freising](https://digitales-archiv.erzbistum-muenchen.de)
 
-The UI is in German, as is the [user manual](docs/Manual/index.md).
+The UI is in German, as is the [user manual](https://matrikelhelfer.niggl-schlagbauer.de/).
 
-> **Status: in development.** Works and is used daily, but not yet packaged for distribution.
+**Download:** grab the installer or portable ZIP from the [latest release](https://github.com/luni64/Matrikelhelfer/releases/latest) (Windows 10/11, [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0)).
 
 ## How it works
 
