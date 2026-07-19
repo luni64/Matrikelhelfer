@@ -4,7 +4,7 @@
         xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
         xmlns:iconPacks="http://metro.mahapps.com/winfx/xaml/iconpacks"
         xmlns:views="clr-namespace:Matrikelhelfer.Views"
-        Title="Matrikelhelfer" Height="800" Width="600"
+        Title="Matrikelhelfer" Height="800" Width="550"
         Icon="pack://application:,,,/Assets/Matrikelhelfer.ico"
         GlowBrush="{DynamicResource MahApps.Brushes.Accent}">
     <mah:MetroWindow.Resources>
@@ -22,6 +22,17 @@
             <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+
+        <!-- Groups a section (heading + its fields) into a subtle rounded
+             "card" so the flat field-list reads as distinct groups. Same
+             theme-managed Gray10 surface as the saved-entries panel, so the
+             tint survives light/dark/accent changes. -->
+        <Style x:Key="SectionCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource MahApps.Brushes.Gray9}" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Margin" Value="0,0,0,10" />
         </Style>
 
         <views:CitationPreviewConverter x:Key="CitationPreviewConverter" />
@@ -133,9 +144,13 @@
         </Border>
 
         <!-- Transparent (but still hit-testable) drag handle between fields
-             and panel; only visible while the panel is open. -->
-        <GridSplitter x:Name="EntriesSplitter" Grid.Column="1" Width="8" Margin="0,15"
-                      HorizontalAlignment="Center" VerticalAlignment="Stretch"
+             and panel; only visible while the panel is open. Stretches
+             across the WHOLE gap (the fields grid drops its right margin, so
+             this column is the entire space between the two panels) - the
+             draggable region is the full gap, not an 8px sliver offset to
+             one side. -->
+        <GridSplitter x:Name="EntriesSplitter" Grid.Column="1" Width="24" Margin="0,15"
+                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                       Background="Transparent" Visibility="Collapsed"
                       DragCompleted="EntriesSplitter_DragCompleted" />
 
@@ -146,24 +161,46 @@
              menu deletes. Default sort: newest first. Gray10 is MahApps'
              subtlest neutral surface brush - theme-managed, so the "card"
              tint survives light/dark/accent changes. -->
-        <Border x:Name="EntriesPanel" Grid.Column="2" Margin="0,15,15,15" Visibility="Collapsed"
-                Background="{DynamicResource MahApps.Brushes.Gray10}" CornerRadius="4" Padding="10">
-            <Grid>
+        <Grid x:Name="EntriesPanel" Grid.Column="2" Margin="0,15,15,15" Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <DockPanel LastChildFill="False">
-                <TextBlock DockPanel.Dock="Left" Text="Gespeicherte Einträge"
-                           Style="{StaticResource SectionHeadingStyle}" />
+            <!-- Top bar: export button only, matching the main panel's
+                 top-row circle buttons in size and vertical position. The
+                 heading moved into the card below, mirroring the left-hand
+                 section cards (heading inside the card). -->
+            <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,8">
                 <Button DockPanel.Dock="Right" Style="{DynamicResource MahApps.Styles.Button.Circle}"
-                        Width="26" Height="26" Padding="0" VerticalAlignment="Top"
+                        Width="40" Height="40" Padding="0"
                         Command="{Binding ExportEntriesCommand}"
                         ToolTip="Einträge als CSV exportieren">
-                    <iconPacks:PackIconFontAwesome6 Width="13" Height="13" Kind="FileExportSolid" />
+                    <iconPacks:PackIconFontAwesome6 Width="18" Height="18" Kind="FileExportSolid" />
                 </Button>
             </DockPanel>
-            <DataGrid x:Name="EntriesGrid" Grid.Row="1"
+            <!-- Invisible sizer: stretches to fill the star row, so its
+                 ActualHeight is exactly the height available to the card.
+                 The card's MaxHeight tracks it, so the cap follows the
+                 window without any magic pixel constants (binding to the
+                 whole panel's height instead overshoots by the top bar and
+                 pushes the grid's scrollbar off-screen). -->
+            <Border x:Name="EntriesRowSizer" Grid.Row="1" IsHitTestVisible="False" />
+
+            <!-- List card: same look as the left-hand section cards (heading
+                 inside, Gray9 surface, matching 12px padding). VerticalAlignment=Top
+                 lets the card hug the actual entries instead of filling the
+                 column; MaxHeight caps it at the available height, and the
+                 DataGrid (DockPanel fill below the heading) scrolls once the
+                 list outgrows that. -->
+            <Border Grid.Row="1" VerticalAlignment="Top"
+                    MaxHeight="{Binding ActualHeight, ElementName=EntriesRowSizer}"
+                    Background="{DynamicResource MahApps.Brushes.Gray9}"
+                    CornerRadius="6" Padding="12">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Gespeicherte Einträge"
+                           Style="{StaticResource SectionHeadingStyle}" />
+            <DataGrid x:Name="EntriesGrid"
+                      Background="Transparent" BorderThickness="0"
                       ItemsSource="{Binding SavedEntries}"
                       SelectedItem="{Binding SelectedSavedEntry, Mode=TwoWay}"
                       AutoGenerateColumns="False" IsReadOnly="True"
@@ -192,18 +229,27 @@
                         </Style.Triggers>
                     </Style>
                 </DataGrid.RowStyle>
+                <!-- All columns Width="Auto": each sizes to its content (like
+                     double-clicking the column dividers) and re-fits as
+                     entries are added, instead of the star columns stretching
+                     to fill the now-wider panel. -->
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*" />
-                    <DataGridTextColumn Header="Buch" Binding="{Binding Info.CitationTitle}" Width="*" />
+                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="Auto" />
+                    <DataGridTextColumn Header="Buch" Binding="{Binding Info.CitationTitle}" Width="Auto" />
                     <DataGridTextColumn Header="Seite" Binding="{Binding Info.PageDescription}" Width="Auto" />
                     <DataGridTextColumn Header="Gespeichert" Width="Auto" SortDirection="Descending"
                                         Binding="{Binding Record.SavedAt, StringFormat='{}{0:dd.MM.yyyy}'}" />
                 </DataGrid.Columns>
             </DataGrid>
-            </Grid>
-        </Border>
+            </DockPanel>
+            </Border>
+        </Grid>
 
-        <Grid Grid.Column="0" Margin="15" >
+        <!-- Symmetric 15 margin while the panel is CLOSED. When it opens,
+             the code-behind (UpdateEntriesPanel) drops the right margin to
+             0 so the splitter column owns the whole gap to the right panel
+             (see EntriesSplitter); it's restored on close. -->
+        <Grid x:Name="ContentGrid" Grid.Column="0" Margin="15" >
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -230,11 +276,16 @@
                     </iconPacks:PackIconFontAwesome6.Style>
                 </iconPacks:PackIconFontAwesome6>
             </Button>
+            <!-- Lesen is the primary action - filled accent so it stands
+                 out from the neutral circle buttons around it. -->
             <Button Style="{DynamicResource MahApps.Styles.Button.Circle}"
                 Width="40" Height="40" Padding="0"
+                Background="{DynamicResource MahApps.Brushes.Accent}"
+                Foreground="White"
                 Command="{Binding ReadCommand}"
                 ToolTip="Kirchenbuch-Seite aus dem Browser lesen">
-                <iconPacks:PackIconFontAwesome6 Width="22" Height="22" Kind="BookOpenReaderSolid" />
+                <iconPacks:PackIconFontAwesome6 Width="22" Height="22" Kind="BookOpenReaderSolid"
+                                                Foreground="White" />
             </Button>
         </StackPanel>
 
@@ -253,113 +304,180 @@
             </Button>
         </StackPanel>
 
+        <!-- Right padding is added ONLY while the scrollbar is actually
+             visible (trigger below), giving the cards a small gap to the
+             scrollbar. With no scrollbar the padding is 0, so the left/right
+             gaps stay symmetric (the button row above has no scrollbar inset
+             to match a constant padding). -->
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled"
-                      Padding="0,0,6,0">
+                      HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer.Style>
+                <Style TargetType="ScrollViewer">
+                    <Setter Property="Padding" Value="0" />
+                    <Style.Triggers>
+                        <Trigger Property="ComputedVerticalScrollBarVisibility" Value="Visible">
+                            <Setter Property="Padding" Value="0,0,8,0" />
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </ScrollViewer.Style>
         <StackPanel>
             <!-- The find's annotation, saved together with the entry so
                  interesting finds can be revisited later: the person found
                  on this page (Name) plus free-text notes (Kommentar). Both
                  cleared on every read. -->
-            <TextBlock Text="Notizen" Style="{StaticResource SectionHeadingStyle}" Margin="0,10,0,0" />
-            <TextBox Margin="0,0,0,8" Padding="6,5"
-                     mah:TextBoxHelper.Watermark="Name"
-                     mah:TextBoxHelper.UseFloatingWatermark="True"
-                     Text="{Binding NameText, UpdateSourceTrigger=PropertyChanged}" />
-            <TextBox Margin="0,0,0,10" Padding="6,5" Height="60"
-                     AcceptsReturn="True" TextWrapping="Wrap"
-                     VerticalScrollBarVisibility="Auto"
-                     mah:TextBoxHelper.Watermark="Kommentar"
-                     mah:TextBoxHelper.UseFloatingWatermark="True"
-                     Text="{Binding CommentText, UpdateSourceTrigger=PropertyChanged}" />
+            <Border Style="{StaticResource SectionCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Notizen" Style="{StaticResource SectionHeadingStyle}" />
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <iconPacks:PackIconFontAwesome6 Grid.Column="0" Kind="UserSolid"
+                                Width="15" Height="15" VerticalAlignment="Center" Margin="2,0,8,0"
+                                Foreground="{DynamicResource MahApps.Brushes.Gray3}" />
+                        <TextBox Grid.Column="1" Padding="6,5"
+                                 mah:TextBoxHelper.Watermark="Name"
+                                 mah:TextBoxHelper.UseFloatingWatermark="True"
+                                 Text="{Binding NameText, UpdateSourceTrigger=PropertyChanged}" />
+                    </Grid>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <iconPacks:PackIconFontAwesome6 Grid.Column="0" Kind="CommentSolid"
+                                Width="15" Height="15" VerticalAlignment="Top" Margin="2,8,8,0"
+                                Foreground="{DynamicResource MahApps.Brushes.Gray3}" />
+                        <TextBox Grid.Column="1" Padding="6,5" Height="60"
+                                 AcceptsReturn="True" TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 mah:TextBoxHelper.Watermark="Kommentar"
+                                 mah:TextBoxHelper.UseFloatingWatermark="True"
+                                 Text="{Binding CommentText, UpdateSourceTrigger=PropertyChanged}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
 
-            <TextBlock Text="Quelle" Style="{StaticResource SectionHeadingStyle}" Margin="0,10,0,0" />
-            <Grid Margin="0,0,0,10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <views:CopyableField Grid.Column="0" Margin="0,0,10,0" Label="Bistum" Value="{Binding BistumText}" />
-                <views:CopyableField Grid.Column="1" Margin="10,0,0,0" Label="Pfarrei" Value="{Binding ParishText}" />
-            </Grid>
+            <Border Style="{StaticResource SectionCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Quelle" Style="{StaticResource SectionHeadingStyle}" />
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <!-- Bistum uses an archive icon: the archive is the
+                             actual place the books are held (Bistum is to be
+                             renamed to Archiv later). -->
+                        <views:CopyableField Grid.Column="0" Margin="0,0,10,0" Label="Bistum"
+                                             IconKind="BoxArchiveSolid" Value="{Binding BistumText}" />
+                        <views:CopyableField Grid.Column="1" Margin="10,0,0,0" Label="Pfarrei"
+                                             IconKind="ChurchSolid" Value="{Binding ParishText}" />
+                    </Grid>
 
-            <Grid Margin="0,0,0,10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <views:CopyableField Grid.Column="0" Margin="0,0,10,0" Label="Buchtyp" Value="{Binding BookText}" />
-                <views:CopyableField Grid.Column="1" Margin="10,0,0,0" Label="Signatur" Value="{Binding SignatureText}" />
-            </Grid>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <views:CopyableField Grid.Column="0" Margin="0,0,10,0" Label="Buchtyp"
+                                             IconKind="BookSolid" Value="{Binding BookText}" />
+                        <views:CopyableField Grid.Column="1" Margin="10,0,0,0" Label="Signatur"
+                                             IconKind="BarcodeSolid" Value="{Binding SignatureText}" />
+                    </Grid>
 
-            <!-- The rendered source line for pasting into the genealogy
-                 software's source (book) record - dropdown switches between
-                 the user-defined source formats, each entry previewing its
-                 rendering of the current record. -->
-            <Grid Margin="0,0,0,10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <ComboBox Grid.Column="0" Margin="0,0,6,0" Tag="Quelle"
-                          ItemsSource="{Binding SourceFormats}"
-                          SelectedItem="{Binding SelectedSourceFormat}"
-                          ItemTemplate="{StaticResource FormatPreviewTemplate}"
-                          ItemContainerStyle="{StaticResource FormatComboItemStyle}" />
-                <Button Grid.Column="1" Width="30" Height="30" Padding="0"
-                        VerticalAlignment="Top"
-                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                        ToolTip="Quellenangabe in die Zwischenablage kopieren"
-                        Command="{Binding CopySourceCommand}">
-                    <iconPacks:PackIconFontAwesome6 Kind="CopySolid" Width="14" Height="14" />
-                </Button>
-            </Grid>
+                    <!-- The rendered source line for pasting into the
+                         genealogy software's source (book) record - dropdown
+                         switches between the user-defined source formats,
+                         each entry previewing its rendering of the current
+                         record. -->
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <!-- 25px left indent = the field icon column width
+                             (2 + 15 icon + 8), so the dropdown's left edge
+                             lines up with the icon-fields above it even
+                             though the dropdown itself has no icon. -->
+                        <ComboBox Grid.Column="0" Margin="25,0,6,0" Tag="Quelle"
+                                  ItemsSource="{Binding SourceFormats}"
+                                  SelectedItem="{Binding SelectedSourceFormat}"
+                                  ItemTemplate="{StaticResource FormatPreviewTemplate}"
+                                  ItemContainerStyle="{StaticResource FormatComboItemStyle}" />
+                        <Button Grid.Column="1" Width="30" Height="30" Padding="0"
+                                VerticalAlignment="Top"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                ToolTip="Quellenangabe in die Zwischenablage kopieren"
+                                Command="{Binding CopySourceCommand}">
+                            <iconPacks:PackIconFontAwesome6 Kind="CopySolid" Width="14" Height="14" />
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Border>
 
-            <TextBlock Text="Zitat" Style="{StaticResource SectionHeadingStyle}" Margin="0,10,0,0" />
-            <Grid Margin="0,0,0,10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <!-- Seite is editable and starts empty on every read (the
-                     number parsed from the scan label rarely matches the
-                     real handwritten page number - no guessing); red border
-                     while still empty. -->
-                <views:CopyableField Grid.Column="0" Margin="0,0,10,0" Label="Seite"
-                                     IsValueReadOnly="False" WarnWhenEmpty="True"
-                                     Value="{Binding PageText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                <views:CopyableField Grid.Column="1" Margin="10,0,0,0" Label="Scan-ID" Value="{Binding PageIdText}" />
-            </Grid>
+            <Border Style="{StaticResource SectionCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Zitat" Style="{StaticResource SectionHeadingStyle}" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <!-- Seite is editable and starts empty on every read
+                             (the number parsed from the scan label rarely
+                             matches the real handwritten page number - no
+                             guessing); red border while still empty. -->
+                        <views:CopyableField Grid.Column="0" Margin="0,0,10,0" Label="Seite"
+                                             IconKind="FileLinesSolid"
+                                             IsValueReadOnly="False" WarnWhenEmpty="True"
+                                             Value="{Binding PageText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        <views:CopyableField Grid.Column="1" Margin="10,0,0,0" Label="Scan-ID"
+                                             IconKind="AddressCardSolid" Value="{Binding PageIdText}" />
+                    </Grid>
 
-            <!-- The rendered per-page citation line for pasting into the
-                 genealogy software's citation on the source above - dropdown
-                 switches between the user-defined citation formats. -->
-            <Grid Margin="0,0,0,10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <ComboBox Grid.Column="0" Margin="0,0,6,0" Tag="Zitat"
-                          ItemsSource="{Binding CitationFormats}"
-                          SelectedItem="{Binding SelectedCitationFormat}"
-                          ItemTemplate="{StaticResource FormatPreviewTemplate}"
-                          ItemContainerStyle="{StaticResource FormatComboItemStyle}" />
-                <Button Grid.Column="1" Width="30" Height="30" Padding="0"
-                        VerticalAlignment="Top"
-                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                        ToolTip="Zitatangabe in die Zwischenablage kopieren"
-                        Command="{Binding CopyCitationCommand}">
-                    <iconPacks:PackIconFontAwesome6 Kind="CopySolid" Width="14" Height="14" />
-                </Button>
-            </Grid>
+                    <!-- The rendered per-page citation line for pasting into
+                         the genealogy software's citation on the source above
+                         - dropdown switches between the user-defined citation
+                         formats. -->
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <!-- Left indent matches the icon-field column above
+                             (see the Quelle dropdown). -->
+                        <ComboBox Grid.Column="0" Margin="25,0,6,0" Tag="Zitat"
+                                  ItemsSource="{Binding CitationFormats}"
+                                  SelectedItem="{Binding SelectedCitationFormat}"
+                                  ItemTemplate="{StaticResource FormatPreviewTemplate}"
+                                  ItemContainerStyle="{StaticResource FormatComboItemStyle}" />
+                        <Button Grid.Column="1" Width="30" Height="30" Padding="0"
+                                VerticalAlignment="Top"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                ToolTip="Zitatangabe in die Zwischenablage kopieren"
+                                Command="{Binding CopyCitationCommand}">
+                            <iconPacks:PackIconFontAwesome6 Kind="CopySolid" Width="14" Height="14" />
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Border>
 
-            <TextBlock Text="Links" Style="{StaticResource SectionHeadingStyle}" Margin="0,10,0,0" />
-            <views:CopyableField Margin="0,0,0,10" Label="Link auf die Kirchenbuch-Seite" Value="{Binding UrlText}"
-                                  ShowExtraButton="True" ExtraCommand="{Binding OpenUrlCommand}"
-                                  ExtraIconKind="ArrowUpRightFromSquareSolid" ExtraTooltip="Im Browser öffnen" />
-            <views:CopyableField Label="Link auf die Bilddatei" Value="{Binding ImageUrlText}"
-                                  ShowExtraButton="True" ExtraCommand="{Binding SaveImageCommand}"
-                                  ExtraIconKind="DownloadSolid" ExtraTooltip="Auf Datenträger speichern..." />
+            <Border Style="{StaticResource SectionCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Links" Style="{StaticResource SectionHeadingStyle}" />
+                    <views:CopyableField Margin="0,0,0,8" Label="Link auf die Kirchenbuch-Seite"
+                                          IconKind="LinkSolid" Value="{Binding UrlText}"
+                                          ShowExtraButton="True" ExtraCommand="{Binding OpenUrlCommand}"
+                                          ExtraIconKind="ArrowUpRightFromSquareSolid" ExtraTooltip="Im Browser öffnen" />
+                    <views:CopyableField Label="Link auf die Bilddatei"
+                                          IconKind="ImageSolid" Value="{Binding ImageUrlText}"
+                                          ShowExtraButton="True" ExtraCommand="{Binding SaveImageCommand}"
+                                          ExtraIconKind="DownloadSolid" ExtraTooltip="Auf Datenträger speichern..." />
+                </StackPanel>
+            </Border>
         </StackPanel>
         </ScrollViewer>
         </Grid>

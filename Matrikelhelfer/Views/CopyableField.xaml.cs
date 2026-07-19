@@ -20,6 +20,12 @@ public partial class CopyableField : UserControl
     public static readonly DependencyProperty LabelProperty =
         DependencyProperty.Register(nameof(Label), typeof(string), typeof(CopyableField));
 
+    // Optional leading icon (left of the floating-watermark label). Default
+    // None -> the icon collapses and the field lays out exactly as before.
+    public static readonly DependencyProperty IconKindProperty =
+        DependencyProperty.Register(nameof(IconKind), typeof(PackIconFontAwesome6Kind), typeof(CopyableField),
+            new PropertyMetadata(PackIconFontAwesome6Kind.None));
+
     public static readonly DependencyProperty ValueProperty =
         DependencyProperty.Register(nameof(Value), typeof(string), typeof(CopyableField),
             new PropertyMetadata(OnWarnStateChanged));
@@ -60,6 +66,12 @@ public partial class CopyableField : UserControl
     {
         get => (string)GetValue(LabelProperty);
         set => SetValue(LabelProperty, value);
+    }
+
+    public PackIconFontAwesome6Kind IconKind
+    {
+        get => (PackIconFontAwesome6Kind)GetValue(IconKindProperty);
+        set => SetValue(IconKindProperty, value);
     }
 
     public string Value

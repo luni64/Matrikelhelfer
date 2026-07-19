@@ -18,7 +18,7 @@ public partial class MainWindow : MetroWindow
     // Width the docked saved-entries panel gets when opened; the window
     // widens/narrows by the same amount so the main fields never resize.
     // Mutable: the GridSplitter's drag result is remembered across toggles.
-    double _entriesPanelWidth = 400;
+    double _entriesPanelWidth = 750;
 
     public MainWindow()
     {
@@ -69,6 +69,9 @@ public partial class MainWindow : MetroWindow
             EntriesColumn.Width = new GridLength(1, GridUnitType.Star);
             EntriesPanel.Visibility = Visibility.Visible;
             EntriesSplitter.Visibility = Visibility.Visible;
+            // Hand the fields' right margin to the splitter column so the
+            // whole gap between the panels is the drag handle.
+            ContentGrid.Margin = new Thickness(15, 15, 0, 15);
             AnimateWindowWidth(Width + _entriesPanelWidth + EntriesSplitter.Width, onCompleted: null);
         }
         else
@@ -81,6 +84,8 @@ public partial class MainWindow : MetroWindow
                 EntriesSplitter.Visibility = Visibility.Collapsed;
                 EntriesColumn.Width = new GridLength(0);
                 ContentColumn.Width = new GridLength(1, GridUnitType.Star);
+                // Restore the symmetric margin now that there's no splitter.
+                ContentGrid.Margin = new Thickness(15);
             });
         }
     }
