@@ -1,3 +1,5 @@
+![Historisches Kirchenbuch](Pictures/banner.jpg){ .banner }
+
 # Matrikelhelfer – Benutzerhandbuch
 
 > Dieses Handbuch ist in Arbeit – die App befindet sich noch in der Entwicklung. Screenshots folgen.
@@ -36,10 +38,12 @@ Das Fenster besteht von oben nach unten aus:
 5. **Links** – die Adressen der Kirchenbuch-Seite und der Bilddatei.
 6. **Statusleiste** – eine Zeile am unteren Rand für Hinweise und Fehlermeldungen (lange Meldungen werden gekürzt; halten Sie den Mauszeiger auf die Meldung, um den vollständigen Text zu sehen).
 
+Die Abschnitte **Notizen**, **Quelle**, **Zitat** und **Links** sind als abgesetzte Karten gruppiert, und jedes Feld trägt links ein kleines Symbol, das kennzeichnet, worum es sich handelt (z. B. ein Archiv-Symbol beim Bistum, ein Kirchen-Symbol bei der Pfarrei). Die primäre Schaltfläche **Lesen** ist farblich hervorgehoben, damit sie sich von den übrigen Schaltflächen abhebt.
+
 Jedes Anzeigefeld hat rechts ein **Kopier-Symbol**, das den Feldinhalt in die Zwischenablage legt.
 
-<!-- ![Hauptfenster – Gesamtansicht](Pictures/02_hauptfenster.png) -->
-<!-- Zeigt: Hauptfenster mit gelesener Matricula-Seite, alle Abschnitte gefüllt -->
+![Hauptfenster – Gesamtansicht](Pictures/02_hauptfenster.png) 
+
 
 ---
 
@@ -64,8 +68,8 @@ Die Verbindung ist rein lesend und **auf Abruf**: Die App liest die Adresszeile 
 
 Wird der verbundene Browser geschlossen, erkennt die App das beim nächsten **Lesen** und zeigt es in der Statusleiste an; verbinden Sie sich dann einfach neu.
 
-<!-- ![Browser-Auswahl](Pictures/04_browserauswahl.png) -->
-<!-- Zeigt: Auswahlfenster mit laufenden Browsern samt Icons -->
+![Browser-Auswahl](Pictures/04_browserauswahl.png)
+<!-- Zeigt: Auswahlfenster mit laufenden Browsern samt Icons --> -->
 
 ---
 
@@ -114,18 +118,20 @@ Hinweise:
 
 ## 8. Gespeicherte Einträge
 
-Die Umschaltfläche rechts in der Werkzeugleiste öffnet die **Liste der gespeicherten Einträge** in einem eigenen Bereich rechts neben den Feldern (das Fenster wird dazu breiter; die Trennlinie lässt sich mit der Maus verschieben):
+Die Umschaltfläche rechts in der Werkzeugleiste öffnet die **Liste der gespeicherten Einträge** in einem eigenen Bereich rechts neben den Feldern (das Fenster wird dazu breiter; die Trennlinie im gesamten Zwischenraum lässt sich mit der Maus verschieben). Die Spaltenbreiten passen sich automatisch dem Inhalt an.
 
 - Spalten: **Name**, **Buch**, **Seite**, **Gespeichert** – per Klick auf die Spaltenköpfe sortierbar, neueste zuerst.
 - Halten Sie den Mauszeiger auf eine Zeile, wird der **Kommentar** des Eintrags eingeblendet.
 - **Einfacher Klick:** zeigt den Eintrag wieder in den Hauptfeldern an.
-- **Doppelklick** (oder Kontextmenü „Im Browser öffnen“): steuert zusätzlich den verbundenen Browser zurück zur gespeicherten Scan-Seite.
-- **Entf** (oder Kontextmenü „Eintrag löschen“): löscht den Eintrag endgültig.
+- **Doppelklick** (oder Kontextmenü „Im Browser öffnen”): steuert zusätzlich den verbundenen Browser zurück zur gespeicherten Scan-Seite.
+- **Löschen:** Fahren Sie mit der Maus über eine Zeile, erscheint rechts ein rotes **Papierkorb-Symbol** – ein Klick löscht diesen Eintrag sofort. Alternativ **Entf** oder das Kontextmenü „Eintrag löschen” für den ausgewählten Eintrag.
+- **Alle löschen:** Die Schaltfläche unten in der Liste entfernt nach einer Sicherheitsabfrage **alle** gespeicherten Einträge auf einmal.
+
+Löschen ist endgültig. Löschen Sie den gerade angezeigten Eintrag, werden auch die Hauptfelder geleert.
 
 Bearbeiten Sie bei einem wieder angezeigten Eintrag die Notizen, können Sie ihn mit **Speichern** als weiteren Fund derselben Seite ablegen.
 
-<!-- ![Gespeicherte Einträge](Pictures/08_gespeicherte_eintraege.png) -->
-<!-- Zeigt: geöffnetes Panel mit mehreren Einträgen, ein Kommentar-Tooltip sichtbar -->
+![Gespeicherte Einträge](Pictures/08_gespeicherte_eintraege.png)
 
 ### 8.1 CSV-Export
 
@@ -161,7 +167,7 @@ Rechts bearbeiten Sie das gewählte Format:
 
 Die Formate werden in `%APPDATA%\Matrikelhelfer\formats.json` gespeichert.
 
-<!-- ![Formateditor](Pictures/10_formateditor.png) -->
+![Formateditor](Pictures/10_formateditor.png)
 <!-- Zeigt: Einstellungsdialog mit Formatliste links, Editor mit Pillen-Zeilen, Datumsformat-Dropdown und Vorschau rechts -->
 
 ### 10.1 Datumsformate

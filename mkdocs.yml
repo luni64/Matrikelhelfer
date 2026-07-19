@@ -38,6 +38,9 @@ theme:
         icon: material/brightness-4
         name: Helles Design
 
+extra_css:
+  - stylesheets/extra.css
+
 plugins:
   - search:
       lang:

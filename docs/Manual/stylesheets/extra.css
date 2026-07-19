@@ -1,0 +1,13 @@
+/* Full-width hero banner on the manual's start page. object-fit: cover +
+   max-height keeps it a banner-shaped strip on wide screens (cropping top/
+   bottom) instead of ballooning to the image's full height. */
+.md-typeset img.banner {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  object-position: center 42%;
+  border-radius: 8px;
+  margin: 0 0 1.4rem 0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.28);
+}
