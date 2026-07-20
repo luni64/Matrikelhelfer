@@ -296,6 +296,7 @@ class MainViewModel : INotifyPropertyChanged
     public ICommand DeleteEntryCommand { get; }
     public ICommand NavigateToEntryCommand { get; }
     public ICommand ExportEntriesCommand { get; }
+    public ICommand ExportBibTexCommand { get; }
     public ICommand ClearAllEntriesCommand { get; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -338,6 +339,7 @@ class MainViewModel : INotifyPropertyChanged
             entry => (entry ?? SelectedSavedEntry) != null);
         NavigateToEntryCommand = new RelayCommand(NavigateToSelectedEntry, () => SelectedSavedEntry != null);
         ExportEntriesCommand = new RelayCommand(ExportEntries, () => SavedEntries.Count > 0);
+        ExportBibTexCommand = new RelayCommand(ExportBibTex, () => SavedEntries.Count > 0);
         ClearAllEntriesCommand = new RelayCommand(ClearAllEntries, () => SavedEntries.Count > 0);
     }
 
@@ -615,6 +617,50 @@ class MainViewModel : INotifyPropertyChanged
                 SavedEntries.Select(e => e.Record), dialog.FileName,
                 _selectedSourceFormat, _selectedCitationFormat);
             StatusText = $"{SavedEntries.Count} Einträge exportiert nach {dialog.FileName}";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Fehler beim Exportieren: {ex.Message}";
+        }
+    }
+
+    // The .bib is rendered with the user's "BibTeX" source format. If they
+    // deleted it, offer to re-add the built-in catalog one (which can't be
+    // lost) rather than silently guessing - and let them cancel.
+    const string BibTexFormatName = "BibTeX";
+
+    void ExportBibTex()
+    {
+        var bibFormat = _sourceFormats.FirstOrDefault(f => f.Name == BibTexFormatName);
+        if (bibFormat is null)
+        {
+            if (MessageBox.Show(
+                    "Es ist kein Quellenformat namens „BibTeX“ vorhanden.\n\n" +
+                    "Soll das Standard-BibTeX-Format zu den Quellenformaten hinzugefügt werden?",
+                    "BibTeX-Export", MessageBoxButton.OKCancel, MessageBoxImage.Question)
+                != MessageBoxResult.OK)
+            {
+                return;
+            }
+            bibFormat = CitationStyleCatalog.SourceSeed.First(f => f.Name == BibTexFormatName);
+            SourceFormats = _sourceFormats.Append(bibFormat).ToList();
+            SaveFormats();
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            FileName = $"Kirchenbuch-Bibliothek_{DateTime.Now:yyyy-MM-dd}.bib",
+            Filter = "BibTeX-Datei|*.bib|Alle Dateien|*.*"
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            BibTexExporter.Export(SavedEntries.Select(e => e.Record), dialog.FileName, bibFormat);
+            StatusText = $"BibTeX-Bibliothek exportiert nach {dialog.FileName}";
         }
         catch (Exception ex)
         {

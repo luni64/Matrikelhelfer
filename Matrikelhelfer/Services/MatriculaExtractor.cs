@@ -57,7 +57,22 @@ class MatriculaExtractor : ICitationExtractor
     public async Task<MatriculaInfo?> GetInfoAsync(PageContext context)
     {
         Uri uri = context.Url;
-        string path = uri.AbsolutePath;
+
+        // Matricula localizes both the field LABELS ("Buchtyp"/"Signatur"/
+        // "Datum von" vs English "Type"/"ID"/"Date from") AND the date VALUES
+        // ("1. Januar 1872" vs "Jan. 1, 1872"). This app is German and writes
+        // German citations, so always read the /de/ version whatever language
+        // the user browses in. The language is the first path segment; swapping
+        // it on the GetLeftPart(Path) STRING (not AbsolutePath) preserves the
+        // double-encoding of a slash-bearing book id further along, e.g.
+        // "106%252F1872" - the site 404s on the single-encoded "%2F" form.
+        string authority = uri.GetLeftPart(UriPartial.Authority);
+        var segments = uri.GetLeftPart(UriPartial.Path)[authority.Length..].Split('/');
+        if (segments.Length > 1 && segments[1].Length == 2)
+        {
+            segments[1] = "de";
+        }
+        string path = string.Join('/', segments);
 
         int pg = 1;
         var pgMatch = PgParam.Match(uri.Query);
@@ -68,7 +83,7 @@ class MatriculaExtractor : ICitationExtractor
 
         if (path != _cachedPath)
         {
-            string html = await s_http.GetStringAsync(uri.GetLeftPart(UriPartial.Path));
+            string html = await s_http.GetStringAsync(authority + path);
             var doc = new HtmlDocument();
             doc.LoadHtml(html);
 

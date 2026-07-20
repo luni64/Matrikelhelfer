@@ -169,16 +169,23 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <!-- Top bar: export button only, matching the main panel's
-                 top-row circle buttons in size and vertical position. The
-                 heading moved into the card below, mirroring the left-hand
-                 section cards (heading inside the card). -->
+            <!-- Top bar: export buttons, matching the main panel's top-row
+                 circle buttons in size and vertical position. The heading
+                 moved into the card below, mirroring the left-hand section
+                 cards (heading inside the card). CSV is rightmost; BibTeX
+                 docks to its left. -->
             <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,8">
                 <Button DockPanel.Dock="Right" Style="{DynamicResource MahApps.Styles.Button.Circle}"
                         Width="40" Height="40" Padding="0"
                         Command="{Binding ExportEntriesCommand}"
                         ToolTip="Einträge als CSV exportieren">
                     <iconPacks:PackIconFontAwesome6 Width="18" Height="18" Kind="FileExportSolid" />
+                </Button>
+                <Button DockPanel.Dock="Right" Style="{DynamicResource MahApps.Styles.Button.Circle}"
+                        Width="40" Height="40" Padding="0" Margin="0,0,8,0"
+                        Command="{Binding ExportBibTexCommand}"
+                        ToolTip="Als BibTeX-Bibliothek (.bib) exportieren">
+                    <iconPacks:PackIconFontAwesome6 Width="18" Height="18" Kind="AtSolid" />
                 </Button>
             </DockPanel>
             <!-- Invisible sizer: stretches to fill the star row, so its
