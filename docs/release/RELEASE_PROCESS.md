@@ -22,16 +22,17 @@ Sources: the entries collected in `docs/release/NEXT_RELEASE.md` during developm
    line (substituted at installer compile time).
 2. **`docs\Manual\CHANGELOG.md`** — insert a new `## X.Y.Z – YYYY-MM-DD`
    section at the top with the same content.
-3. **User manual (`docs\Manual\index.md`)** — add the release's user-facing
-   features/sections and bump the footer version line.
-   > ⚠️ **Stable releases only.** Any push touching `docs/Manual/**` (or
-   > `mkdocs.yml`) triggers `manual.yml`, which deploys the manual to the
-   > **public** GitHub Pages site. So update the manual **only for a stable
-   > release and in sync with it** — never for a pre-release, or the live
-   > manual would document features nobody can install yet. For a
-   > **pre-release, leave the manual untouched** (it keeps tracking the
-   > current stable version); describe the beta's changes in the GitHub
-   > release notes instead.
+3. **User manual (`docs\Manual\index.md`)** — bring it up to date with the
+   release's user-facing features/sections and bump the footer version line,
+   then **deploy it** — the `manual.yml` workflow is **on-demand only** (no
+   auto-deploy on push), so publishing to the public Pages site is a
+   deliberate step: run it from the Actions tab or
+   `gh workflow run manual.yml`. Do this deploy for a **stable release** so
+   the live manual matches what people can install.
+   > The manual *source* can be committed/pushed any time (it's how you get a
+   > current copy on another machine) — that no longer publishes anything.
+   > For a **pre-release**, update/push the source if useful but **don't run
+   > the workflow**; describe the beta's changes in the GitHub release notes.
 4. **Reset `docs/release/NEXT_RELEASE.md`** to the empty skeleton
    (`# Next Release` / `## Features` / `## Bug Fixes`) — stable releases only;
    a pre-release keeps accumulating notes there toward the eventual X.Y.Z.

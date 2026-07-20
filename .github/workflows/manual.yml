@@ -3,13 +3,12 @@
 
 name: Deploy manual to GitHub Pages
 
+# On-demand only. Pushing docs/Manual/** keeps the manual SOURCE current in
+# the repo (available on every machine) but deliberately does NOT publish, so
+# the live site never describes unreleased features. Deploy to the public Pages
+# site at release time: "Run workflow" in the Actions tab, or
+#   gh workflow run manual.yml
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docs/Manual/**"
-      - mkdocs.yml
-      - .github/workflows/manual.yml
   workflow_dispatch:
 
 permissions:
