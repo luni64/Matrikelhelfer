@@ -5,8 +5,13 @@ are PowerShell from the repo root; `gh` is the GitHub CLI (on `PATH`).
 
 ## 1. Version bump (two places)
 
-- `Matrikelhelfer\Matrikelhelfer.csproj` → `<Version>X.Y.Z</Version>`
-- `installer\setup.iss` → `#define MyAppVersion "X.Y.Z"`
+- `Matrikelhelfer\Matrikelhelfer.csproj` → `<Version>X.Y.Z</Version>` — for a
+  pre-release use the full semver, e.g. `X.Y.Z-beta.N`; the title bar shows it
+  verbatim (via `InformationalVersion`).
+- `installer\setup.iss` → `#define MyAppVersion "X.Y.Z"` (display version). For
+  a pre-release also bump the numeric `#define MyAppVersionInfo "X.Y.Z.0"` —
+  `VersionInfoVersion` is the exe/installer file-version resource and needs
+  `x.x.x.x`, so it can't carry the `-beta` suffix.
 
 ## 2. Roll the release docs
 
@@ -15,10 +20,21 @@ Sources: the entries collected in `docs/release/NEXT_RELEASE.md` during developm
 1. **`installer\WHATS_NEW.template`** — fill in the `New`/`Fixed` sections
    from `NEXT_RELEASE.md`; keep the `${VERSION}` placeholder in the title
    line (substituted at installer compile time).
-2. **`CHANGELOG.md`** — insert a new `## X.Y.Z - YYYY-MM-DD` section at the
-   top with the same content.
-3. **Reset `docs/release/NEXT_RELEASE.md`** to the empty skeleton
-   (`# Next Release` / `## Features` / `## Bug Fixes`).
+2. **`docs\Manual\CHANGELOG.md`** — insert a new `## X.Y.Z – YYYY-MM-DD`
+   section at the top with the same content.
+3. **User manual (`docs\Manual\index.md`)** — add the release's user-facing
+   features/sections and bump the footer version line.
+   > ⚠️ **Stable releases only.** Any push touching `docs/Manual/**` (or
+   > `mkdocs.yml`) triggers `manual.yml`, which deploys the manual to the
+   > **public** GitHub Pages site. So update the manual **only for a stable
+   > release and in sync with it** — never for a pre-release, or the live
+   > manual would document features nobody can install yet. For a
+   > **pre-release, leave the manual untouched** (it keeps tracking the
+   > current stable version); describe the beta's changes in the GitHub
+   > release notes instead.
+4. **Reset `docs/release/NEXT_RELEASE.md`** to the empty skeleton
+   (`# Next Release` / `## Features` / `## Bug Fixes`) — stable releases only;
+   a pre-release keeps accumulating notes there toward the eventual X.Y.Z.
 
 ## 3. Build the binaries
 
