@@ -14,7 +14,7 @@ Matrikelhelfer unterstützt Sie bei der Ahnenforschung in Online-Kirchenbüchern
 
 Aus diesen Angaben erzeugt die App fertig formatierte, mit einem Klick kopierbare **Quellen- und Zitatangaben** – in frei definierbaren Formaten, passend zur Arbeitsweise von Genealogie-Programmen (eine *Quelle* pro Kirchenbuch, dazu je Fundstelle ein *Zitat*).
 
-Interessante Funde können Sie außerdem mit Name und Kommentar versehen und dauerhaft **speichern**. Das ist besonders praktisch, wenn Sie beim Blättern auf etwas stoßen, für das gerade keine Zeit ist: Fund speichern, kurz benennen und kommentieren – und später über die Liste der gespeicherten Einträge gezielt wieder aufgreifen. Name und Kommentar helfen dabei, den Fund in der Liste wiederzufinden; ein Doppelklick auf den Eintrag öffnet die gespeicherte Seite wieder im Browser. Die gesammelten Einträge lassen sich zudem als **CSV-Datei** oder als **BibTeX-Bibliothek** für Ihr eigenes Archiv exportieren (siehe Kapitel 8).
+Interessante Funde können Sie außerdem mit Name und Kommentar versehen und dauerhaft **speichern**. Das ist besonders praktisch, wenn Sie beim Blättern auf etwas stoßen, für das gerade keine Zeit ist: Fund speichern, kurz benennen und kommentieren – und später über die Liste der gespeicherten Einträge gezielt wieder aufgreifen. Name und Kommentar helfen dabei, den Fund in der Liste wiederzufinden; ein Doppelklick auf den Eintrag öffnet die gespeicherte Seite wieder im Browser. Die gesammelten Einträge lassen sich zudem als **CSV-Datei** oder als **BibTeX-Bibliothek** für Ihr eigenes Archiv exportieren (siehe Kapitel 7).
 
 **Unterstützte Anbieter:**
 
@@ -51,7 +51,7 @@ Jedes Anzeigefeld hat rechts ein **Kopier-Symbol**, das den Feldinhalt in die Zw
 1. Öffnen Sie im Browser eine Kirchenbuch-Scan-Seite (Matricula Online oder DFG-Viewer).
 2. Klicken Sie in Matrikelhelfer auf das **Steckersymbol** und wählen Sie Ihren Browser aus.
 3. Klicken Sie auf **Lesen** (Buchsymbol) – die Felder füllen sich mit den Angaben des Kirchenbuchs.
-4. Tragen Sie im Feld **Seite** die handschriftliche Seitennummer ein (siehe [Kapitel 6](#6-seite-scan-id-und-scan-nr)).
+4. Tragen Sie im Feld **Seite** die handschriftliche Seitennummer ein (siehe [Abschnitt 6.2](#62-seite-scan-id-und-scan-nr)).
 5. Kopieren Sie Quellen- und Zitatangabe mit den Kopier-Symbolen in Ihr Genealogie-Programm.
 6. Optional: Name und Kommentar eintragen und den Fund mit **Speichern** (Diskette) dauerhaft ablegen.
 
@@ -82,7 +82,7 @@ Ein Klick auf **Lesen** (Buchsymbol):
 
 Beim Blättern im Scan (nächste/vorherige Seite im Viewer) genügt ein erneuter Klick auf **Lesen** – die App erkennt, dass es sich um dasselbe Buch handelt, und aktualisiert nur die Scan-Angaben, ohne die Seite neu aus dem Internet zu laden. Pro Buch und Sitzung wird nur einmal geladen; der Datenverkehr bleibt minimal.
 
-**Wichtig:** Jeder Klick auf **Lesen** beginnt einen neuen Fund – alle Felder (auch Name, Kommentar und Seite) werden zuvor geleert. Enthalten die Notizfelder Eingaben, die noch nicht gespeichert wurden, fragt die App vorher nach (siehe [Kapitel 7](#7-funde-speichern)).
+**Wichtig:** Jeder Klick auf **Lesen** beginnt einen neuen Fund – alle Felder (auch Name, Kommentar und Seite) werden zuvor geleert. Enthalten die Notizfelder Eingaben, die noch nicht gespeichert wurden, fragt die App vorher nach (siehe [Kapitel 7](#7-funde-speichern-und-verwalten)).
 
 Zeigt der Browser keine lesbare Kirchenbuch-Seite (z. B. eine Pfarrei-Übersichtsseite oder eine beliebige andere Website), meldet die Statusleiste „Keine unterstützte Kirchenbuch-Seite“ und die Felder bleiben leer.
 
@@ -100,7 +100,20 @@ Da diese Funktion neu und noch experimentell ist: Falls die Felderkennung bei ei
 
 ---
 
-## 6. Seite, Scan-ID und Scan-Nr
+## 6. Quellen- und Zitatangabe
+
+Aus den ausgelesenen Angaben erzeugt Matrikelhelfer zwei fertige Texte – die **Quellenangabe** für das Buch und die **Zitatangabe** für die Fundstelle. Dieser Abschnitt erklärt beide sowie die verschiedenen Seiten- und Scan-Nummern, die dabei eine Rolle spielen.
+
+### 6.1 Quelle und Zitat
+
+Genealogie-Programme unterscheiden zwischen der **Quelle** (dem Kirchenbuch) und dem **Zitat** (der konkreten Fundstelle auf einer Seite). Matrikelhelfer bildet das mit zwei getrennten Feldern ab:
+
+- **Quellenangabe** – identifiziert das Buch, z. B. „Erzbistum München und Freising, Waging am See-St. Martin, Taufen 1846–1885, Signatur CB481, M7658.“
+- **Zitatangabe** – die Fundstelle, z. B. „S. 12, ID: 007“.
+
+Beide Felder sind Auswahllisten: Aufgeklappt zeigen sie alle Ihre Formate, jeweils schon mit den Daten des aktuellen Fundes ausgefüllt – Sie wählen einfach die Variante, die Ihnen gefällt. Die Auswahl bleibt auch nach einem Neustart erhalten. Das Kopier-Symbol daneben legt den angezeigten Text in die Zwischenablage.
+
+### 6.2 Seite, Scan-ID und Scan-Nr
 
 Diese drei Begriffe tauchen in der App und in den Formaten auf und bezeichnen Verschiedenes:
 
@@ -112,7 +125,7 @@ Das Feld **Seite** ist bewusst das einzige, das Sie selbst ausfüllen: Die in Sc
 
 ---
 
-## 7. Funde speichern
+## 7. Funde speichern und verwalten
 
 Mit **Speichern** (Diskettensymbol) legen Sie den aktuell angezeigten Fund dauerhaft ab – zusammen mit Ihren Notizen:
 
@@ -125,9 +138,7 @@ Hinweise:
 - Enthalten Name, Kommentar oder Seite noch nicht gespeicherte Eingaben, warnt die App, bevor diese durch **Lesen** oder die Auswahl eines gespeicherten Eintrags verloren gehen.
 - Die Einträge werden in `%APPDATA%\Matrikelhelfer\entries.json` gespeichert – eine gut lesbare Textdatei, die Sie einfach sichern können. Gespeichert werden nur die Rohdaten; die Quellen- und Zitatangaben werden bei der Anzeige stets mit Ihren **aktuellen** Formaten neu erzeugt.
 
----
-
-## 8. Gespeicherte Einträge
+### 7.1 Die Liste der gespeicherten Einträge
 
 Die Umschaltfläche rechts in der Werkzeugleiste öffnet die **Liste der gespeicherten Einträge** in einem eigenen Bereich rechts neben den Feldern (das Fenster wird dazu breiter; die Trennlinie im gesamten Zwischenraum lässt sich mit der Maus verschieben). Die Spaltenbreiten passen sich automatisch dem Inhalt an.
 
@@ -144,14 +155,14 @@ Bearbeiten Sie bei einem wieder angezeigten Eintrag die Notizen, können Sie ihn
 
 ![Gespeicherte Einträge](Pictures/08_gespeicherte_eintraege.png)
 
-### 8.1 CSV-Export
+### 7.2 CSV-Export
 
 Das **Export-Symbol** über der Liste schreibt alle gespeicherten Einträge in eine CSV-Datei – gedacht für Ihr eigenes Langzeitarchiv, z. B. um Jahre später nachzusehen, ob Sie ein Buch schon einmal durchgearbeitet haben.
 
 - Enthält alle Einzelfelder (inklusive der getrennten Signaturen und aller Links) **plus** die fertige Quellen- und Zitatangabe in den gerade gewählten Formaten.
 - Das Format ist auf deutsches Excel abgestimmt (Semikolon-Trennung, UTF-8 mit BOM): Ein Doppelklick auf die Datei öffnet sie korrekt mit allen Umlauten; mehrzeilige Kommentare bleiben erhalten.
 
-### 8.2 BibTeX-Export
+### 7.3 BibTeX-Export
 
 **Was ist BibTeX?** BibTeX ist ein weit verbreitetes Format für Literaturverzeichnisse. Eine `.bib`-Datei ist im Grunde eine kleine **Datenbank Ihrer Quellen** – hier also der Kirchenbücher. Das Format stammt ursprünglich aus dem Textsatzsystem LaTeX, wird aber längst nicht nur dort verwendet: Über Literaturverwaltungs-Programme lassen sich die Einträge auch in gängige Textverarbeitungen wie Word einbinden (siehe unten).
 
@@ -180,18 +191,7 @@ Die Datei ist als **UTF-8 ohne BOM** gespeichert – so erwarten es LaTeX- und L
 
 ---
 
-## 9. Quellen- und Zitatangabe
-
-Genealogie-Programme unterscheiden zwischen der **Quelle** (dem Kirchenbuch) und dem **Zitat** (der konkreten Fundstelle auf einer Seite). Matrikelhelfer bildet das mit zwei getrennten Feldern ab:
-
-- **Quellenangabe** – identifiziert das Buch, z. B. „Erzbistum München und Freising, Waging am See-St. Martin, Taufen 1846–1885, Signatur CB481, M7658.“
-- **Zitatangabe** – die Fundstelle, z. B. „S. 12, ID: 007“.
-
-Beide Felder sind Auswahllisten: Aufgeklappt zeigen sie alle Ihre Formate, jeweils schon mit den Daten des aktuellen Fundes ausgefüllt – Sie wählen einfach die Variante, die Ihnen gefällt. Die Auswahl bleibt auch nach einem Neustart erhalten. Das Kopier-Symbol daneben legt den angezeigten Text in die Zwischenablage.
-
----
-
-## 10. Formate bearbeiten
+## 8. Formate bearbeiten
 
 Das **Zahnrad in der Titelleiste** öffnet den Formateditor. Links wählen Sie zunächst, welche Liste Sie bearbeiten möchten (**Quellenformate** oder **Zitatformate**), und darunter das einzelne Format; mit **+** und **Papierkorb** legen Sie Formate an bzw. löschen sie (das letzte Format einer Liste kann nicht gelöscht werden). Änderungen gelten erst nach **OK**; **Abbrechen** verwirft sie.
 
@@ -200,7 +200,7 @@ Rechts bearbeiten Sie das gewählte Format:
 - **Name** – der Anzeigename in der Auswahlliste.
 - **Formatvorlage** – der Text der Angabe mit `{Platzhaltern}`, die automatisch durch die Werte des Fundes ersetzt werden.
 - **Platzhalter-Pillen** – ein Klick fügt den Platzhalter an der Schreibmarke ein. Halten Sie den Mauszeiger auf eine Pille, erscheint eine kurze Erklärung mit Beispielwert. Die vollständige Referenz steht im [Anhang](#anhang-platzhalter-referenz).
-- **Datumsformat** – bestimmt, wie die Datums-Platzhalter `{Von}`, `{Bis}` und `{AccessDate}` ausgegeben werden (siehe [10.1](#101-datumsformate)).
+- **Datumsformat** – bestimmt, wie die Datums-Platzhalter `{Von}`, `{Bis}` und `{AccessDate}` ausgegeben werden (siehe [8.1](#81-datumsformate)).
 - **Vorschau** – zeigt das Format live mit Beispielwerten.
 
 Die Formate werden in `%APPDATA%\Matrikelhelfer\formats.json` gespeichert.
@@ -208,7 +208,7 @@ Die Formate werden in `%APPDATA%\Matrikelhelfer\formats.json` gespeichert.
 ![Formateditor](Pictures/10_formateditor.png)
 <!-- Zeigt: Einstellungsdialog mit Formatliste links, Editor mit Pillen-Zeilen, Datumsformat-Dropdown und Vorschau rechts -->
 
-### 10.1 Datumsformate
+### 8.1 Datumsformate
 
 Jedes Format hat sein eigenes Datumsformat – so kann ein englisches Zitierformat englische Datumsangaben verwenden, während Ihre deutschen Formate deutsch bleiben:
 
@@ -225,9 +225,9 @@ Jedes Format hat sein eigenes Datumsformat – so kann ein englisches Zitierform
 
 Kann ein Datum nicht als solches erkannt werden (z. B. „um 1650“), wird es unverändert übernommen – die App erfindet keine Datumsangaben.
 
-### 10.2 Platzhalter aufbereiten (`:clean`)
+### 8.2 Platzhalter aufbereiten (`:clean`)
 
-Für technische Ausgaben – etwa den Zitierschlüssel einer [BibTeX-Datei](#82-bibtex-export) – gibt es den Zusatz **`:clean`**. Schreiben Sie ihn hinter einen Platzhalternamen (z. B. `{Signatur:clean}`), wird der Wert in eine „schlüsseltaugliche“ Form gebracht:
+Für technische Ausgaben – etwa den Zitierschlüssel einer [BibTeX-Datei](#73-bibtex-export) – gibt es den Zusatz **`:clean`**. Schreiben Sie ihn hinter einen Platzhalternamen (z. B. `{Signatur:clean}`), wird der Wert in eine „schlüsseltaugliche“ Form gebracht:
 
 - Umlaute werden umgeschrieben (ä→ae, ö→oe, ü→ue, ß→ss), sonstige Akzente entfernt.
 - Leerzeichen, Kommas, Punkte usw. werden zu `_`; **Bindestriche bleiben erhalten** (z. B. „3-01“).
@@ -239,7 +239,7 @@ Unter den mitgelieferten Formaten finden Sie bereits ein Quellenformat **„BibT
 
 ---
 
-## 11. Links und Bild speichern
+## 9. Links und Bild speichern
 
 Im Abschnitt **Links**:
 
@@ -250,7 +250,7 @@ Für Formate stehen zusätzlich `{BookUrl}` (Link auf das Buch, ohne Seitenangab
 
 ---
 
-## 12. Tipps für die Praxis
+## 10. Tipps für die Praxis
 
 - Tragen Sie die **Seite** direkt nach dem Lesen ein, solange Sie den Scan noch vor Augen haben – das rote Feld erinnert Sie daran.
 - Nutzen Sie **kurze, klare Namensformen** im Notizfeld (z. B. „Anna Maier, *1846“), damit die Einträge in der Liste und im CSV-Export gut lesbar bleiben.
@@ -260,7 +260,7 @@ Für Formate stehen zusätzlich `{BookUrl}` (Link auf das Buch, ohne Seitenangab
 
 ---
 
-## 13. Häufige Fragen (FAQ)
+## 11. Häufige Fragen (FAQ)
 
 **Die Statusleiste meldet „Keine unterstützte Kirchenbuch-Seite“ – warum?**
 Der aktive Browser-Tab zeigt keine lesbare Scan-Seite. Übersichtsseiten (Pfarrei, Bistum) enthalten keine Buchdaten – öffnen Sie ein konkretes Buch im Viewer und klicken Sie erneut auf **Lesen**.
@@ -269,7 +269,7 @@ Der aktive Browser-Tab zeigt keine lesbare Scan-Seite. Übersichtsseiten (Pfarre
 Der verbundene Browser wurde möglicherweise geschlossen oder neu gestartet. Verbinden Sie sich über das Steckersymbol neu.
 
 **Warum ist das Feld Seite nach jedem Lesen leer?**
-Absichtlich – siehe [Kapitel 6](#6-seite-scan-id-und-scan-nr): Die App übernimmt keine Scan-Nummern als Seitenzahlen; nur Ihre eigene Eingabe zählt.
+Absichtlich – siehe [Abschnitt 6.2](#62-seite-scan-id-und-scan-nr): Die App übernimmt keine Scan-Nummern als Seitenzahlen; nur Ihre eigene Eingabe zählt.
 
 **Warum ist Speichern ausgegraut?**
 Entweder wurde noch keine Seite gelesen, oder der angezeigte Fund samt Notizen ist bereits exakt so gespeichert. Ändern Sie z. B. den Kommentar, wird Speichern wieder aktiv.
@@ -279,7 +279,7 @@ Nein. Die App liest nur die Adresszeile des von Ihnen gewählten Browsers und l�
 
 ---
 
-## 14. Installation
+## 12. Installation
 
 Matrikelhelfer ist auf der [GitHub-Releases-Seite](https://github.com/luni64/Matrikelhelfer/releases) erhältlich – wahlweise als **Installer** (`Matrikelhelfer-…-Setup.exe`) oder als **portables ZIP-Archiv**. Voraussetzung ist Windows 10/11 sowie die [.NET-8-Desktop-Runtime](https://dotnet.microsoft.com/download/dotnet/8.0); der Installer bietet ihre Einrichtung bei Bedarf automatisch an.
 
@@ -306,7 +306,7 @@ Matrikelhelfer ist auf der [GitHub-Releases-Seite](https://github.com/luni64/Mat
 | `{ImageUrl}` | Direktlink auf die Bilddatei des Scans | … |
 | `{AccessDate}` | Heutiges Datum (Zugriffsdatum), im gewählten Datumsformat | 18. Juli 2026 |
 
-Jeder Platzhalter kann mit dem Zusatz `:clean` in eine schlüsseltaugliche Form gebracht werden, z. B. `{Signatur:clean}` (siehe [10.2](#102-platzhalter-aufbereiten-clean)).
+Jeder Platzhalter kann mit dem Zusatz `:clean` in eine schlüsseltaugliche Form gebracht werden, z. B. `{Signatur:clean}` (siehe [8.2](#82-platzhalter-aufbereiten-clean)).
 
 ---
 
