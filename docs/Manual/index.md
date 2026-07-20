@@ -144,7 +144,7 @@ Die Umschaltfläche rechts in der Werkzeugleiste (Listensymbol) öffnet die **Li
 - Halten Sie den Mauszeiger auf eine Zeile, wird der **Kommentar** des Eintrags eingeblendet.
 - **Einfacher Klick:** übernimmt den Eintrag in den Hauptbereich und zeigt die Felder an.
 - Ein **Doppelklick** auf eine Zeile (oder Kontextmenü „Im Browser öffnen”) steuert zusätzlich den Browser zur Seite mit dem Scan des Eintrages. So lassen sich die Einträge bequem „durchblättern“.
-- **Löschen:** Fahren Sie mit der Maus über eine Zeile, erscheint rechts ein rotes **Papierkorb-Symbol** – ein Klick löscht diesen Eintrag sofort. Alternativ **Entf** oder das Kontextmenü „Eintrag löschen” für den ausgewählten Eintrag.
+- **Löschen:** Bewegen Sie die Maus über eine Zeile, erscheint rechts ein rotes **Papierkorb-Symbol** – ein Klick löscht diesen Eintrag sofort. Alternativ **Entf** oder das Kontextmenü „Eintrag löschen” für den ausgewählten Eintrag.
 - **Alle löschen:** Die Schaltfläche unten in der Liste entfernt nach einer Sicherheitsabfrage **alle** gespeicherten Einträge auf einmal.
 
 Löschen ist endgültig. Löschen Sie den gerade angezeigten Eintrag, werden auch die Hauptfelder geleert.
