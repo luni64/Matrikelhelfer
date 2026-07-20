@@ -41,7 +41,7 @@ public partial class MainWindow : MetroWindow
         // column only draws the header arrow - the actual sort needs a
         // SortDescription. Header clicks replace it as usual.
         EntriesGrid.Items.SortDescriptions.Add(
-            new SortDescription("Record.SavedAt", ListSortDirection.Descending));
+            new SortDescription("SavedAt", ListSortDirection.Descending));
     }
 
     void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

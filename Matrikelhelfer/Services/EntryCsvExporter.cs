@@ -17,7 +17,7 @@ static class EntryCsvExporter
     const char Separator = ';';
 
     public static void Export(
-        IEnumerable<SavedRecord> records, string path,
+        IEnumerable<LibraryEntry> records, string path,
         CitationStyle sourceFormat, CitationStyle citationFormat)
     {
         var sb = new StringBuilder();

@@ -11,9 +11,12 @@ A Windows WPF desktop app (.NET 8, C# 12, MahApps.Metro, German UI) for genealog
 Matrikelhelfer/
 ├── App.xaml/.cs                 # StartupUri -> Views/MainWindow.xaml
 ├── Models/
-│   ├── MatriculaInfo.cs         # record: raw scraped citation fields (+ stored PageUrl; computed CitationTitle/BookLabel/BookUrl/EffectivePageUrl, [JsonIgnore])
+│   ├── MatriculaInfo.cs         # record: raw scraped citation fields (+ stored PageUrl; computed CitationTitle/BookLabel/BookUrl/BookKey/EffectivePageUrl, [JsonIgnore])
 │   ├── CitationStyle.cs         # record: named format template (Name + Template string)
-│   └── SavedRecord.cs           # record: one persisted find (Id, SavedAt, Name, Comment, Info)
+│   ├── StoredPage.cs            # record: one church-book page (Id, Info incl. the user-edited Seite) + page identity
+│   ├── Finding.cs               # record: one find on a page (Id, PageId, SavedAt, Name, Comment)
+│   ├── LibraryEntry.cs          # record: Finding joined to its StoredPage (what the exporters take)
+│   └── SavedRecord.cs           # record: LEGACY flat find - read only by the entries.json migration
 ├── Browsers/                    # Per-browser address-bar lookup strategies
 │   ├── IBrowserAddressBarLocator.cs
 │   ├── AddressBarLocatorBase.cs # shared URL-shape fallback scan
@@ -29,7 +32,7 @@ Matrikelhelfer/
 │   ├── CitationTemplateEngine.cs # {Placeholder} template rendering over a MatriculaInfo
 │   ├── CitationStyleCatalog.cs  # built-in templates: first-start seeds + fixed defaults
 │   ├── FormatSettingsStore.cs   # persists format lists + active selections (formats.json, best-effort)
-│   ├── SavedEntryStore.cs       # persists saved finds (entries.json, atomic writes, errors surfaced)
+│   ├── LibraryStore.cs          # persists pages+findings (library.json, atomic; migrates pre-2.0 entries.json)
 │   ├── EntryCsvExporter.cs      # exports saved finds as German-Excel-friendly CSV
 │   └── BibTexExporter.cs        # exports saved finds as a BibTeX .bib source library (one @misc per unique book)
 ├── ViewModels/
@@ -41,6 +44,7 @@ Matrikelhelfer/
     ├── MainWindow.xaml/.cs      # main UI + saved-entries Flyout (DataGrid)
     ├── SettingsWindow.xaml/.cs  # format editor dialog
     ├── BrowserPickerWindow.xaml/.cs  # "connect to which browser?" chooser
+    ├── ChoiceWindow.xaml/.cs     # reusable 3-way question (primary / secondary / real Cancel)
     ├── CopyableField.xaml/.cs   # reusable labeled field w/ copy button (opt-in wrap/edit/warn)
     └── CitationPreviewConverter.cs   # IMultiValueConverter: renders a style against DisplayedInfo
 ```
@@ -132,20 +136,109 @@ Genealogy software keeps *sources* (the church book) separate from *citations* o
 The number in Matricula's scan label rarely matches the real handwritten page number, so the parsed value is discarded on every read: the Seite field starts **empty** (red-border warning via `WarnWhenEmpty`) and only ever holds what the user typed. An edit is pushed back into the displayed/current record (`info with { Page = ... }`) so `{Seite}` renders and saves with it; clearing it means "page unknown".
 
 ### Saved finds (persistent)
-- `SavedRecord` (Models) is the storage shape: `Id` (GUID), `SavedAt`, `Name`, `Comment`, `Info` (the full `MatriculaInfo`). Storage is deliberately **flat** — hierarchy (Land → Bistum → Pfarrei → Buch, a future tree view) is derived at display time, never stored. Rendered citation text is never stored either: display always re-renders with the *current* formats.
-- `SavedEntryStore` persists to `%APPDATA%\Matrikelhelfer\entries.json` with a `version` field. **Decision log: JSON over SQLite** — entries accrue by manual clicks (thousands at most), and a readable, backup-friendly file beats a binary DB for personal research data; if search/tags/10k+ entries materialize, swap this class's internals to SQLite plus a one-time import. Writes are **atomic** (temp file + `File.Replace`) and failures are **surfaced** in the status line (unlike the best-effort format store — these entries can represent years of research).
-- Main-window flow: `Name` and `Kommentar` (together in the "Notizen" section at the top) annotate the current page. **Lesen always starts fresh**: every read attempt first clears ALL fields (a failed read must never leave the previous record standing next to its error message — it reads as success). If Name/Kommentar/Seite hold input not covered by a saved entry, a discard-confirmation dialog guards both **Lesen** and **selecting a saved entry** (the selection guard fires at most once per browsing session: once an entry is displayed, record+notes match a saved entry and the guard stays silent; rejecting the selection snaps the grid highlight back via a `Dispatcher.BeginInvoke`d re-notification). Selecting an entry also syncs `_currentInfo` to the displayed record — Speichern and the duplicate check act on it, so an edited Kommentar saves against the *displayed* entry, not the last-read page. All actions are circle icon buttons in the top row (connect + Lesen left; Speichern + list toggle + settings right); **Lesen** is the primary action and gets a filled-accent circle to stand out. The fields column scrolls (`ScrollViewer`) and its sections (Notizen / Quelle / Zitat / Links) are grouped into subtle rounded Gray9 "cards" (`SectionCardStyle`); each field carries a leading `CopyableField` icon (the Quelle/Zitat dropdowns have none but are left-indented by the icon-column width to stay flush with the fields above). Status/error messages live in a one-line status bar at the window bottom (ellipsis-trimmed, full text in its tooltip — keep new status texts short). **Speichern** persists immediately and is disabled while record+notes exactly match an existing entry (accidental repeat click) — same page with different notes stays saveable (several finds per page are normal).
+
+> The storage model itself is documented in **"Finds & pages"** below (Page/Finding split, identity, save flow, migration). This section covers the surrounding UI and export plumbing.
+
+- `SavedRecord` (Models) is the **legacy** shape, kept only so `LibraryStore` can read a pre-2.0 `entries.json` during migration — nothing else uses it. Rendered citation text is never stored: display always re-renders with the *current* formats.
+- `LibraryStore` persists to `%APPDATA%\Matrikelhelfer\library.json` (`version: 2`, pages + findings in one file). **Decision log: JSON over SQLite** — entries accrue by manual clicks (thousands at most), and a readable, backup-friendly file beats a binary DB for personal research data; if search/tags/10k+ entries materialize, swap this class's internals to SQLite plus a one-time import. Writes are **atomic** (temp file + `File.Replace`) and failures are **surfaced** in the status line (unlike the best-effort format store — these entries can represent years of research). A file that exists but won't parse sets `_storageUnreadable`, which **blocks saving entirely** — writing over a library we failed to read would destroy the data the failure is protecting.
+- Main-window flow: `Name` and `Kommentar` (together in the "Notizen" section at the top) annotate the current page. **Lesen always starts fresh**: every read attempt first clears ALL fields (a failed read must never leave the previous record standing next to its error message — it reads as success). The dirty check (`IsDirty`, see below) guards both **Lesen** and **selecting a saved entry** with a discard-confirmation dialog; rejecting the selection snaps the grid highlight back via a `Dispatcher.BeginInvoke`d re-notification. Selecting an entry **binds** it (`_boundEntry`) and syncs `_currentInfo` to it, so an edited Kommentar updates the *displayed* entry rather than saving against the last-read page. All actions are circle icon buttons in the top row (connect + Lesen left; Speichern + list toggle + settings right); **Lesen** is the primary action and gets a filled-accent circle to stand out. The fields column scrolls (`ScrollViewer`) and its sections (Notizen / Quelle / Zitat / Links) are grouped into subtle rounded Gray9 "cards" (`SectionCardStyle`); each field carries a leading `CopyableField` icon (the Quelle/Zitat dropdowns have none but are left-indented by the icon-column width to stay flush with the fields above). Status/error messages live in a one-line status bar at the window bottom (ellipsis-trimmed, full text in its tooltip — keep new status texts short). **Speichern** persists immediately and is enabled while there is something to commit (an unbound read, or a bound finding with uncommitted edits) — see the save flow below. Several finds per page are normal and expected.
 - The list UI is a **docked right-hand panel** (not a Flyout — a Flyout overlays and hides the fields): a top bar with the CSV-export button (a circle button sized/aligned to the main window's top-row buttons across the splitter) over a Gray9 "card" `Border` that holds the "Gespeicherte Einträge" heading and a sortable read-only DataGrid (Name | Buch | Seite | Gespeichert; default newest-first; comment as row tooltip). Single click redisplays the entry in the main fields; **double-click** (or context menu) drives the browser back to the scan. Deleting is offered three ways, all persisted and all routed through one `RelayCommand<SavedEntry>` (`DeleteEntryCommand`): Entf/context menu act on the *selected* row (no command parameter), while a per-row **trash button** — shown only while its row is hovered (`Visibility=Hidden`, so the column width stays put) — passes its own row as the parameter so it deletes without changing selection. Deleting the entry that's currently on display also clears the main fields (`ClearDisplay`), so its now-orphaned Name/Kommentar don't trip the discard-unsaved guard on the next selection. A guarded **"Alle löschen"** button at the card bottom (`ClearAllEntriesCommand`, OK/Cancel confirmation) bulk-deletes. The card **hugs its content** (`VerticalAlignment=Top` + a `DockPanel`-filled DataGrid) rather than filling the column, and its `MaxHeight` is bound to an invisible sizer `Border` that stretches the star row — so the cap tracks the window with no pixel constant, and once the list outgrows it the DataGrid scrolls internally (binding `MaxHeight` to the whole panel's height instead overshoots by the top bar and pushes the scrollbar off-screen).
 - **CSV export** (button in the panel header → `EntryCsvExporter`): all raw fields (incl. the `SignaturPfarrei`/`SignaturBuch` split) plus the Quellen-/Zitatangabe *rendered with the currently active formats* — the stored data stays raw, but an export is a snapshot for outside the app (the user's own long-term archive, e.g. "did I work through this book years ago?"). Format targets German Excel: `;` separator and a UTF-8 BOM (without the BOM, Excel guesses ANSI and mangles umlauts on double-click); standard CSV quoting handles multi-line comments.
 - **BibTeX export** (second panel-header button → `BibTexExporter`): writes a `.bib` **source library** — one `@misc` per unique *book* (finds are deduplicated by `BookUrl`, since a `.bib` lists sources, not per-page citations), rendered with the user's `BibTeX` source format. Cite keys are made unique (`a`/`b`/`c` suffixes) so the file compiles even when distinct books collide (ARCHION's signature-less `_EMPTY` keys). If no `BibTeX` source format exists (user deleted it), a dialog offers to re-add the built-in catalog one or cancel. UTF-8 **without** BOM (LaTeX toolchains, unlike the Excel-targeted CSV).
 - Panel geometry (`MainWindow.xaml.cs`, `UpdateEntriesPanel`): while OPEN the column roles invert — the fields column is frozen at its pixel width and the panel column is star-sized, so the toggle's window-width animation *and* manual window resizing only ever change the panel, never the fields. A GridSplitter adjusts the split (its chosen width is remembered across toggles); the splitter column's width must be part of the window-width delta on both open and close, or each cycle leaks it into the window width. The splitter **stretches across the whole gap** between the two panels (the fields grid drops its right margin while OPEN so the splitter column owns the gap, making the entire space the drag handle instead of an off-centre sliver); on close `UpdateEntriesPanel` restores the fields grid's symmetric margin. The fields `ScrollViewer` adds right padding **only while its scrollbar is showing** (a trigger on `ComputedVerticalScrollBarVisibility`) — a constant padding would inset the cards but not the button row above, making the closed-window right gap wider than the left.
 
+### Finds & pages
+
+Replaces the flat `SavedRecord` model. Written before the code so the intent is on record: this is not a document editor's save/save-as, and reading it as one is what makes the behaviour look arbitrary.
+
+#### The intent
+
+The unit the user creates is a **find** — a person spotted on a scan — not a page. **Several finds on one page are normal and expected** (two baptisms in the same register opening), so "save" can never mean "one entry per page", and "save as" has no meaning at all: there is no document, only a growing list of finds that happen to cluster on pages.
+
+The shipped model conflated the two. Each find stored the *entire* scrape (`MatriculaInfo`) inline, and the only duplicate guard compared that whole record plus both note fields for value equality. Since the record includes volatile fields — `Url` (with `cHash`, `?pg=`, `/de/` vs `/en/`), `PageUrl`, `ImageUrl`, `ScanLabel`, and the user-edited `Page` — practically any change made the record "new", so pressing Speichern after typing one more character appended a second row for the same person. That is the entry explosion; deduplication alone would not have fixed it, because the app had no notion of *which* saved find the display currently represents.
+
+Two ideas fix it:
+
+1. **Separate what the user edits from what is scraped.** The governing rule: *store what the user edits; derive what is scraped.* The handwritten page number (`Seite`) is user-edited and belongs to the **page**, so it is stored once there and every find on that page sees it. Country/archive/parish/book are pure scrape, re-derived correctly on every read, so they are **not** stored as entities — a five-level `Land → Bistum → Pfarrei → Buch → Seite` tree is built at *display* time by grouping. Storing that tree was considered and rejected: its nodes would have to be keyed on scraped display strings, and those are demonstrably unstable (the `/en/` bug produced different `Buchtyp`/`Signatur` text for the same book), so a name-keyed tree silently forks one parish into two branches. `BookKey` — a normalized URL — cannot fork that way. If a level ever becomes hand-editable (a corrected parish name, a note on a book), *then* it has earned entity status by the same argument `Seite` did.
+2. **The display is explicitly *bound* to a find.** Editing a bound find updates it in place; creating a second find is a deliberate answer to a prompt, never a side effect of typing.
+
+#### Entities
+
+Storage stays flat — two collections, no nesting.
+
+```
+Page                                   Finding
+  Id                                     Id
+  BookKey   (normalized, see below)      PageId → Page.Id
+  Scan                                   SavedAt
+  Seite     ← the only user-edited       Name
+  ScanLabel, Url, ImageUrl, PageUrl      Comment
+  book metadata (Land, Bistum, Pfarrei,
+  Buchtyp, Datum*, Signatur*)
+```
+
+**Book is derived, not stored** — group Pages by `BookKey` at runtime, exactly as `BibTexExporter` already does. Book metadata is duplicated per Page and that is deliberate: it is never hand-edited, so it cannot drift the way `Seite` did.
+
+#### Identity
+
+`BookKey` = `BookUrl` normalized: host lowercased, `www.` dropped, `https` forced, the **language path segment neutralized** (`/de/` ≡ `/en/` — we deliberately keep links in the user's language, so raw `BookUrl` comparison would under-merge), trailing slash stripped, surviving query params sorted (DFG's `tx_dlf[id]` must survive). `Url`/`PageUrl` are untouched — `BookKey` exists only for comparison and is never displayed or linked.
+
+**Page discriminator**, one rule with fallbacks:
+
+> `Scan` when `> 0`; else `Seite` when non-empty (trimmed); else **none** → every read makes a new Page.
+
+Matricula/DFG take the first branch. ARCHION has no scan number (`Scan == 0`) and its permalink encodes zoom/pan, so it is a *view* URL, not a page identifier — the user-entered `Seite` is the only page-level discriminator available, and a find with no page reference cannot be cited anyway. `CopyableField.WarnWhenEmpty` should flag `Seite` on ARCHION reads for that reason.
+
+**Consequence — mutable identity on ARCHION.** Correcting `Seite` there changes which page the object *is*. If no Page holds the new number it is a harmless rename; if one does, the two must be **merged** (move findings over, delete the emptied Page). Merge silently with a status line (*"Seite 43 mit vorhandener Seite zusammengeführt – 2 Funde"*) — once the numbers match, "same page" is unambiguous.
+
+#### Flow
+
+`Lesen` **never writes.** Page changes commit on `Speichern` only; an unsaved `Seite` correction is discarded, guarded by the dirty check.
+
+| Trigger | State | Result |
+|---|---|---|
+| **Lesen** | any | Load page context, unbind. No storage write. |
+| Select entry in list | any | Display + **bind** to that Finding (same semantics as a read) |
+| **Speichern** | nothing bound, no same-name Finding on the Page | Create Finding (+ Page if new), bind |
+| **Speichern** | nothing bound, **same-name** Finding exists on the Page | Ask **[Bestehenden aktualisieren] [Neuer Eintrag] [Abbrechen]** |
+| **Speichern** | bound, Name unchanged | Update bound Finding in place |
+| **Speichern** | bound, Name changed, previous name **empty** | Update in place (this is first-time naming, not a new find) |
+| **Speichern** | bound, Name changed, previous name non-empty | Ask **[Überschreiben] [Neuer Eintrag] [Abbrechen]** |
+| Comment / Seite edit | any | Lands on the bound Finding / its Page. Never prompts. |
+| Delete last Finding on a Page | — | Garbage-collect the orphan Page |
+
+**Name is the find's identity within a page; everything else annotates it.** That is why a changed name asks and a changed comment does not. The same prompt serves the *correction* case (fix a typo → Überschreiben) and the *second person* case (new name → Neuer Eintrag) — one mechanism, not two. Both prompts fire on **Speichern**, never on keystroke or focus-loss.
+
+Both use `ChoiceWindow`, not `MessageBox`: these are genuine either/or questions that don't map onto OK/Cancel. The first implementation forced them into a `MessageBox`, so the buttons read "OK"/"Abbrechen" while the body text had to explain what each would do — and "Abbrechen" then *performed an action* instead of cancelling. `ChoiceWindow` gives each choice its own labelled button plus a real Cancel that aborts the save.
+
+The same-name prompt is also the escape hatch for two genuinely different people with the same name on one page (father and son, both "Johann Meier"): answer *Neuer Eintrag*. Without it, auto-binding would make the second one unreachable.
+
+**Dirty check** (drives the discard-confirmation on **Lesen** *and* on switching list selection): the annotation state differs from its committed counterpart — the bound Finding and its Page, or *empty* when nothing is bound. Deliberately binding-independent: the case that matters most is a fresh read with a typed-but-never-saved name, where nothing is bound at all. This replaces today's check, which merely asks whether the note fields are non-empty.
+
+#### Accepted limitations
+
+- **ARCHION without a page number** has no discriminator, so re-reading the same physical page yields a second Page object and a `Seite` correction on one will not reach the other.
+- **Handwritten numbers are not guaranteed unique within a book** — registers that restart numbering per section can make two physical pages both read "42", which would wrongly merge. Contained to ARCHION, and strictly better than no identity. `Seite` is trimmed but otherwise taken verbatim: `42a`, `42 recto` and `42` are distinct pages. No clever parsing.
+
+#### Migration (one-time, at startup)
+
+`entries.json` already carries a `version` field — key off it. The old flat records convert cleanly: findings map **1:1**, so the visible list keeps exactly the same rows and count; only Pages consolidate underneath. Nothing appears to vanish.
+
+- **One file, not two.** `library.json` = `{ "version": 2, "pages": [...], "findings": [...] }`, written atomically (temp + `File.Replace`, as `SavedEntryStore` already does). Two files would leave a window where findings are orphaned from their pages.
+- **Order: write new → read it back and verify → only then rename the old.**
+- **Rename, never delete** — `entries.json` → `entries-v1.bak`. A conversion bug (a field that quietly arrives empty) often surfaces days later, and this file can represent years of research. A few KB of backup is the cheapest insurance in the app.
+- **Conflicting values when several old records collapse onto one Page** — they can disagree precisely because the old model let them drift (`Seite` corrected on one but not another; `/de/` vs `/en/` `Url`s; differing `ImageUrl`/`PageUrl`/`ScanLabel`). Rule: **most recent `SavedAt` wins, but a non-empty value beats an empty one** — so a later correction beats an earlier blank, and a blank never overwrites real data. Without an explicit rule this is whatever order the loop happened to run in, which is how a correction gets silently lost.
+- **A corrupt or unreadable `entries.json` must fail loudly** and leave the file alone — treating it as "nothing to migrate" would start empty and then write a fresh library over the top.
+- Old ARCHION records take the `Seite` branch, so those *with* a page number merge into shared Pages and those without stay separate. Desired, but worth knowing it happens on first launch.
+
+> Note: this invalidates the "no users besides the author, so no migration code" convention (see *Conventions*, and `CLAUDE.md`) — 1.0.0 shipped and there are real `entries.json` files in the wild.
+
 ## Data Flow
 
 1. Plug button → `BrowserPickerWindow` → `BrowserConnection.Connect` (stores the chosen browser window).
 2. **Lesen** → `BrowserConnection.ReadActiveTabUrl()` (UIA ValuePattern) → URL routed to the matching `ICitationExtractor` (`CanHandle`) → `GetInfoAsync(uri)` → `DisplayInfo` populates all fields and renders Quellen-/Zitatangabe with the active formats; Name/Kommentar/Seite reset.
-3. **Speichern** → `SavedRecord` → `SavedEntries` (ObservableCollection, bound to the flyout grid) → `SavedEntryStore.Save` (atomic).
-4. Selecting a saved entry → `DisplayInfo(entry.Info)` + restore Name/Kommentar; double-click additionally → `TryNavigateAsync(entry.Info.Url)`.
+3. **Speichern** → prompts if needed (name changed / same name already on this page) → `CommitPage` (create, update, or merge the `StoredPage`) → create or update the `Finding` → `LibraryStore.Save` (atomic).
+4. Selecting a saved entry → **binds** it → `DisplayInfo(entry.Info)` + restore Name/Kommentar; double-click additionally → `TryNavigateAsync(entry.Info.EffectivePageUrl)`.
 5. Settings dialog OK → new `FormatSettings` → both dropdowns refresh, fields re-render, `FormatSettingsStore.Save`.
 
 ## Known Gotchas (accepted, worth remembering)
@@ -177,3 +270,4 @@ The number in Matricula's scan label rarely matches the real handwritten page nu
 - MVVM, no business logic in code-behind.
 - German UI text; German field names double as template placeholder names.
 - This is a personal test/PoC tool — targeted fixes over speculative resilience (no defense against Matricula site redesigns, no support for untested browsers) unless asked.
+- **Migration policy differs per file, by what losing it costs.** `formats.json` stays migration-free: a lost format is re-picked in a minute, so renamed tokens simply get re-edited (or the file deleted to re-seed). `entries.json` / `library.json` **does** get migration code — 1.0.0 shipped, the files exist on real users' machines, and the data can represent years of research. The blanket "no users yet, so no migration" rule that predates the release no longer applies to saved finds.

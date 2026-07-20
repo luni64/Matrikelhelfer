@@ -130,9 +130,11 @@ Mit **Speichern** (Diskettensymbol) legen Sie den aktuell angezeigten Fund zusam
 
 **Hinweise:**
 
-- **Speichern** ist ausgegraut, solange der angezeigte Fund samt Notizen exakt einem bereits gespeicherten Eintrag entspricht – das verhindert versehentliche Doppel-Speicherungen. Dieselbe Seite mit anderem Namen oder Kommentar lässt sich jederzeit erneut speichern (mehrere Funde pro Seite sind normal).
+- **Speichern** aktualisiert den gerade angezeigten Fund, solange der **Name** unverändert bleibt. Sie können Kommentar oder Seite also jederzeit nachtragen, ohne dass dabei ein zweiter Eintrag entsteht.
+- Auf einer Seite können **mehrere Funde** gespeichert werden – etwa wenn Sie dort zwei Personen finden. Tragen Sie dazu einfach einen anderen **Namen** ein: Matrikelhelfer fragt dann nach, ob der vorhandene Eintrag geändert oder ein neuer angelegt werden soll.
+- Der Eintrag im Feld **Seite** – die Seitennummer, die Sie vom angezeigten Bild übernommen haben – gehört zur Kirchenbuchseite selbst, nicht zum einzelnen Fund: Wenn Sie ihn korrigieren, gilt die Korrektur automatisch für **alle** Funde auf dieser Seite.
 - Enthalten Name, Kommentar oder Seite noch nicht gespeicherte Eingaben, warnt die App, bevor diese durch **Lesen** oder die Auswahl eines gespeicherten Eintrags verloren gehen.
-- Die Einträge werden in `%APPDATA%\Matrikelhelfer\entries.json` gespeichert – eine gut lesbare Textdatei, die Sie einfach sichern können. Gespeichert werden nur die Rohdaten; die Quellen- und Zitatangaben werden bei der Anzeige stets mit Ihren **aktuellen** Formaten neu erzeugt.
+- Die Einträge werden in `%APPDATA%\Matrikelhelfer\library.json` gespeichert – eine gut lesbare Textdatei, die Sie einfach sichern können. Gespeichert werden nur die Rohdaten; die Quellen- und Zitatangaben werden bei der Anzeige stets mit Ihren **aktuellen** Formaten neu erzeugt. (Beim Update von einer älteren Version wird eine vorhandene `entries.json` beim ersten Start automatisch übernommen und als `entries-v1.bak` aufbewahrt.)
 
 **Die Liste der gespeicherten Einträge**
 
@@ -149,7 +151,7 @@ Die Umschaltfläche rechts in der Werkzeugleiste (Listensymbol) öffnet die **Li
 
 Löschen ist endgültig. Löschen Sie den gerade angezeigten Eintrag, werden auch die Hauptfelder geleert.
 
-Bearbeiten Sie bei einem wieder angezeigten Eintrag die Notizen, können Sie ihn mit **Speichern** als weiteren Fund derselben Seite ablegen.
+Bearbeiten Sie bei einem wieder angezeigten Eintrag die Notizen, aktualisiert **Speichern** genau diesen Eintrag. Möchten Sie stattdessen einen weiteren Fund derselben Seite anlegen, ändern Sie den **Namen** – die Rückfrage bietet dann „Neuer Eintrag“ an.
 
 
 

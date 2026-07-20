@@ -26,6 +26,22 @@ class MainViewModel : INotifyPropertyChanged
 
     MatriculaInfo? _currentInfo;
 
+    // The saved finding the display currently represents, or null when the
+    // display is a fresh read that hasn't been saved yet. This is THE central
+    // piece of the save flow: editing a bound finding updates it in place, so
+    // typing one more character can never append a second row for the same
+    // person - which is exactly what the pre-2.0 flat model did, because it
+    // compared the whole scraped record (volatile URLs included) for equality.
+    SavedEntry? _boundEntry;
+
+    // Every known page, kept in sync with the Page references in SavedEntries.
+    readonly List<StoredPage> _pages = new();
+
+    // Set when library.json/entries.json exists but could not be parsed.
+    // Saving is then BLOCKED: writing an empty library over a file we failed
+    // to read would destroy the very data the failure is protecting.
+    bool _storageUnreadable;
+
     // The user's source- and citation-format templates, edited via the
     // settings dialog and persisted across restarts. Shown in the two
     // format dropdowns; the selected one of each list renders the
@@ -90,18 +106,21 @@ class MainViewModel : INotifyPropertyChanged
 
     // User-entered notes for the entry about to be saved: whose record was
     // found on this page and why it is interesting. Cleared on every read.
+    // Name is the find's identity WITHIN its page: changing it means
+    // "probably a different person", so Speichern asks; changing the comment
+    // never does.
     string _nameText = "";
     public string NameText
     {
         get => _nameText;
-        set { SetField(ref _nameText, value); InvalidateDuplicateCheck(); }
+        set => SetField(ref _nameText, value);
     }
 
     string _commentText = "";
     public string CommentText
     {
         get => _commentText;
-        set { SetField(ref _commentText, value); InvalidateDuplicateCheck(); }
+        set => SetField(ref _commentText, value);
     }
 
     string _pageIdText = "";
@@ -253,11 +272,12 @@ class MainViewModel : INotifyPropertyChanged
             SetField(ref _selectedSavedEntry, value);
             if (value != null)
             {
-                // _currentInfo must follow the display: Speichern and the
-                // duplicate check act on it, so leaving it on the last READ
-                // page would save edited notes against the wrong record.
+                // Selecting an entry BINDS it, exactly like saving one does:
+                // from here, editing the comment and pressing Speichern
+                // updates this finding instead of creating another. That makes
+                // list selection and re-reading behave identically.
                 _currentInfo = value.Info;
-                InvalidateDuplicateCheck();
+                _boundEntry = value;
                 DisplayInfo(value.Info);
                 NameText = value.Name;
                 CommentText = value.Comment;
@@ -309,18 +329,35 @@ class MainViewModel : INotifyPropertyChanged
         _selectedSourceFormat = formats.SelectedSource;
         _selectedCitationFormat = formats.SelectedCitation;
 
-        foreach (var record in SavedEntryStore.Load())
+        // Loads library.json, migrating a pre-2.0 entries.json on first run.
+        // A parse failure must NOT degrade to "start empty" - see
+        // _storageUnreadable.
+        try
         {
-            SavedEntries.Add(new SavedEntry(record));
+            var library = LibraryStore.Load();
+            _pages.AddRange(library.Pages);
+            var pagesById = _pages.ToDictionary(p => p.Id);
+            foreach (var finding in library.Findings)
+            {
+                if (pagesById.TryGetValue(finding.PageId, out var page))
+                {
+                    SavedEntries.Add(new SavedEntry(finding, page));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _storageUnreadable = true;
+            StatusText = $"Einträge nicht lesbar – Speichern gesperrt: {ex.Message}";
         }
 
         ToggleConnectionCommand = new RelayCommand(ToggleConnection);
         ReadCommand = new RelayCommand(ReadCurrentTab, () => _connection.IsConnected);
-        // Save is blocked while record+notes exactly match an existing entry
-        // (an accidental repeat click); the same page with different
-        // name/comment stays saveable - several finds per page are normal.
+        // Enabled while there is something to commit: an unbound read (which
+        // would create a finding) or a bound one with uncommitted edits.
+        // Blocked outright if the library couldn't be read.
         SaveCommand = new RelayCommand(SaveCurrentEntry,
-            () => _currentInfo != null && !IsDuplicateOfSaved());
+            () => _currentInfo != null && !_storageUnreadable && (_boundEntry is null || IsDirty()));
         SaveImageCommand = new RelayCommand(SaveImage, () => !string.IsNullOrEmpty(ImageUrlText));
         OpenUrlCommand = new RelayCommand(() => NavigateTo(UrlText), () => !string.IsNullOrEmpty(UrlText));
         OpenSettingsCommand = new RelayCommand(OpenSettings);
@@ -343,20 +380,44 @@ class MainViewModel : INotifyPropertyChanged
         ClearAllEntriesCommand = new RelayCommand(ClearAllEntries, () => SavedEntries.Count > 0);
     }
 
-    // "Does the current record+notes exactly match a saved entry?" - the
-    // scan is exact but O(entries) with record value-equality, and it sits
-    // in SaveCommand.CanExecute, which CommandManager re-queries on
-    // practically every UI event. So the result is CACHED and invalidated
-    // at the few places its inputs (record, notes, entry list) change.
-    // Deliberately not a plain dirty flag: the scan re-evaluates exactly,
-    // so undoing an edit back to the saved text or deleting the matching
-    // entry gives the right answer - a flag would get both wrong.
-    bool? _isDuplicateCached;
+    // "Are there uncommitted edits?" - deliberately binding-INDEPENDENT: the
+    // case that matters most is a fresh read with a typed-but-never-saved
+    // name, where nothing is bound at all. The committed counterpart is the
+    // bound finding (and its page), or empty when nothing is bound.
+    //
+    // Not a dirty FLAG: this re-evaluates exactly, so undoing an edit back to
+    // the saved text correctly reports "clean" again - a flag would get that
+    // wrong. Cheap enough (no collection scan) to run in CanExecute.
+    bool IsDirty()
+    {
+        var (name, comment, seite) = CommittedState();
+        return NameText.Trim() != name || CommentText.Trim() != comment || PageText.Trim() != seite;
+    }
 
-    void InvalidateDuplicateCheck() => _isDuplicateCached = null;
+    (string Name, string Comment, string Seite) CommittedState()
+    {
+        if (_boundEntry is not null)
+        {
+            return (_boundEntry.Name, _boundEntry.Comment, _boundEntry.Page.Seite ?? "");
+        }
+        // Unbound: no notes are committed, but a page already stored for this
+        // identity contributes its Seite - a read that prefills the number
+        // from storage must not immediately look dirty.
+        return ("", "", FindPage(_currentInfo)?.Seite ?? "");
+    }
 
-    bool IsDuplicateOfSaved() => _isDuplicateCached ??= SavedEntries.Any(e =>
-        e.Info == _currentInfo && e.Name == NameText.Trim() && e.Comment == CommentText.Trim());
+    // The stored page matching what is on display, or null when none exists
+    // (or the provider gives no page identity at all - ARCHION without a
+    // page number).
+    StoredPage? FindPage(MatriculaInfo? info)
+    {
+        if (info is null)
+        {
+            return null;
+        }
+        string? identity = StoredPage.IdentityOf(info);
+        return identity is null ? null : _pages.FirstOrDefault(p => p.Identity == identity);
+    }
 
     void DeleteEntry(SavedEntry? entry)
     {
@@ -366,10 +427,20 @@ class MainViewModel : INotifyPropertyChanged
         }
         // Was this the entry currently on display? (Selecting an entry makes
         // it the selected one - see SelectedSavedEntry.)
-        bool wasDisplayed = ReferenceEquals(_selectedSavedEntry, entry);
+        bool wasDisplayed = ReferenceEquals(_selectedSavedEntry, entry) ||
+                            ReferenceEquals(_boundEntry, entry);
         SavedEntries.Remove(entry);
+
+        // A page exists only to carry findings - garbage-collect it once its
+        // last one is gone.
+        if (SavedEntries.All(e => e.Page.Id != entry.Page.Id))
+        {
+            _pages.RemoveAll(p => p.Id == entry.Page.Id);
+        }
+
         if (wasDisplayed)
         {
+            _boundEntry = null;
             // Drop the selection AND wipe the fields: otherwise the deleted
             // entry's notes stay in Name/Kommentar/Seite with no matching
             // saved entry, so the next list selection would pop the
@@ -378,7 +449,6 @@ class MainViewModel : INotifyPropertyChanged
             SetField(ref _selectedSavedEntry, null, nameof(SelectedSavedEntry));
             ClearDisplay();
         }
-        InvalidateDuplicateCheck();
         PersistEntries();
     }
 
@@ -399,14 +469,14 @@ class MainViewModel : INotifyPropertyChanged
             return;
         }
         SavedEntries.Clear();
+        _pages.Clear();
         // If a saved entry was on display, wipe the fields too (its notes
         // would otherwise be orphaned); a fresh unsaved read stays untouched.
-        if (_selectedSavedEntry != null)
+        if (_selectedSavedEntry != null || _boundEntry != null)
         {
             SetField(ref _selectedSavedEntry, null, nameof(SelectedSavedEntry));
             ClearDisplay();
         }
-        InvalidateDuplicateCheck();
         PersistEntries();
     }
 
@@ -455,14 +525,12 @@ class MainViewModel : INotifyPropertyChanged
     // yet, ask before discarding it.
     bool ConfirmDiscardUnsaved()
     {
-        bool hasInput = NameText.Trim().Length > 0 || CommentText.Trim().Length > 0 ||
-                        PageText.Trim().Length > 0;
-        if (!hasInput || IsDuplicateOfSaved())
+        if (!IsDirty())
         {
             return true;
         }
         return MessageBox.Show(
-            "Die Eingaben (Name/Kommentar/Seite) wurden nicht gespeichert und gehen beim Lesen verloren. Fortfahren?",
+            "Die Eingaben (Name/Kommentar/Seite) wurden nicht gespeichert und gehen verloren. Fortfahren?",
             "Ungespeicherte Eingaben",
             MessageBoxButton.OKCancel, MessageBoxImage.Warning) == MessageBoxResult.OK;
     }
@@ -474,7 +542,7 @@ class MainViewModel : INotifyPropertyChanged
     void ClearDisplay()
     {
         _currentInfo = null;
-        InvalidateDuplicateCheck();
+        _boundEntry = null;
         _settingFieldsFromInfo = true;
         try
         {
@@ -550,9 +618,16 @@ class MainViewModel : INotifyPropertyChanged
         // matches the real handwritten page number, so the Seite field
         // starts empty on every read and only ever holds what the user
         // typed. No guessing.
-        info = info is null ? null : info with { Page = null };
+        // ...but DO restore a number the user already recorded for this page:
+        // re-reading a page you corrected should show your correction, not an
+        // empty field. (Needs Page cleared first, so the identity lookup uses
+        // the scan number rather than a stale parsed value.)
+        if (info is not null)
+        {
+            info = info with { Page = null };
+            info = info with { Page = FindPage(info)?.Seite };
+        }
         _currentInfo = info;
-        InvalidateDuplicateCheck();
         if (info != null)
         {
             StatusText = "";
@@ -566,28 +641,205 @@ class MainViewModel : INotifyPropertyChanged
         CommandManager.InvalidateRequerySuggested();
     }
 
+    // The save flow. Both prompts fire HERE, on Speichern - never on
+    // keystroke or focus-loss, which would be unbearable while typing.
     void SaveCurrentEntry()
     {
-        if (_currentInfo == null)
+        if (_currentInfo == null || _storageUnreadable)
         {
             return;
         }
-        var record = new SavedRecord(
-            Guid.NewGuid(), DateTime.Now, NameText.Trim(), CommentText.Trim(), _currentInfo);
-        SavedEntries.Add(new SavedEntry(record));
-        InvalidateDuplicateCheck();
+
+        string name = NameText.Trim();
+        string comment = CommentText.Trim();
+        string seite = PageText.Trim();
+
+        // Step 1 - a changed name usually means a different person, but it is
+        // also how a typo gets corrected, so ask instead of guessing. (Naming
+        // a still-unnamed finding is NOT a change: no prompt.)
+        if (_boundEntry is not null && _boundEntry.Name.Length > 0 &&
+            !string.Equals(_boundEntry.Name, name, StringComparison.Ordinal))
+        {
+            var answer = ChoiceWindow.Ask(
+                "Name geändert",
+                $"Der Name wurde von „{_boundEntry.Name}“ zu „{name}“ geändert.\n\n" +
+                "Soll der vorhandene Eintrag überschrieben werden (Korrektur), oder ist es " +
+                "ein weiterer Fund auf derselben Seite?",
+                "Überschreiben", "Neuer Eintrag");
+            if (answer == ChoiceResult.Cancel)
+            {
+                return;
+            }
+            if (answer == ChoiceResult.Secondary)
+            {
+                _boundEntry = null;
+            }
+        }
+
+        // Step 2 - does the RESULTING name collide with a different finding on
+        // this page? Deliberately checked for renames too, not just for new
+        // finds: renaming an entry back onto a name that already exists is
+        // exactly how two identical rows used to appear.
+        SavedEntry? absorbed = null;
+        var twin = FindingWithName(_boundEntry?.Page ?? FindPage(_currentInfo), name, _boundEntry);
+        if (twin is not null && _boundEntry is null)
+        {
+            // Re-reading a page and re-entering someone recorded earlier. Ask
+            // rather than auto-bind: there COULD be two Johann Meiers on one
+            // page (father and son), and this prompt is their only escape hatch.
+            var answer = ChoiceWindow.Ask(
+                "Fund bereits vorhanden",
+                $"Auf dieser Seite ist bereits ein Fund „{name}“ gespeichert.\n\n" +
+                "Soll dieser Eintrag aktualisiert werden, oder ist es eine zweite Person " +
+                "gleichen Namens auf derselben Seite?",
+                "Bestehenden aktualisieren", "Neuer Eintrag");
+            if (answer == ChoiceResult.Cancel)
+            {
+                return;
+            }
+            if (answer == ChoiceResult.Primary)
+            {
+                _boundEntry = twin;
+            }
+        }
+        else if (twin is not null)
+        {
+            // A rename walked onto an existing name - typically undoing an
+            // accidental split ("Johann Maier 2" corrected back). Merging
+            // writes the current input onto the survivor and drops the entry
+            // being edited, so no duplicate is left behind.
+            var answer = ChoiceWindow.Ask(
+                "Gleicher Name bereits vorhanden",
+                $"Auf dieser Seite gibt es bereits einen weiteren Fund „{name}“.\n\n" +
+                "„Zusammenführen“ übernimmt die Eingaben in den vorhandenen Eintrag und " +
+                "entfernt den gerade bearbeiteten. „Beide behalten“ legt zwei gleichnamige " +
+                "Funde auf derselben Seite an (z. B. Vater und Sohn).",
+                "Zusammenführen", "Beide behalten");
+            if (answer == ChoiceResult.Cancel)
+            {
+                return;
+            }
+            if (answer == ChoiceResult.Primary)
+            {
+                absorbed = _boundEntry;
+                _boundEntry = twin;
+            }
+        }
+
+        var page = CommitPage(_currentInfo, seite);
+
+        if (_boundEntry is null)
+        {
+            var entry = new SavedEntry(
+                new Finding(Guid.NewGuid(), page.Id, DateTime.Now, name, comment), page);
+            SavedEntries.Add(entry);
+            _boundEntry = entry;
+        }
+        else
+        {
+            // SavedAt deliberately keeps its original value - it records when
+            // the find was made, so fixing a typo must not reshuffle a
+            // date-sorted list.
+            _boundEntry.Update(
+                _boundEntry.Finding with { PageId = page.Id, Name = name, Comment = comment },
+                page);
+        }
+
+        // The absorbed entry disappears only AFTER its data has been written
+        // onto the survivor.
+        if (absorbed is not null && !ReferenceEquals(absorbed, _boundEntry))
+        {
+            SavedEntries.Remove(absorbed);
+        }
+
+        // Keep the grid selection on what the display is bound to.
+        SetField(ref _selectedSavedEntry, _boundEntry, nameof(SelectedSavedEntry));
         PersistEntries();
-        // The just-saved state is now a duplicate - gray out Speichern.
         CommandManager.InvalidateRequerySuggested();
+    }
+
+    // A finding on `page` carrying `name`, ignoring `except` (the entry being
+    // edited - it can't collide with itself).
+    SavedEntry? FindingWithName(StoredPage? page, string name, SavedEntry? except) =>
+        page is null
+            ? null
+            : SavedEntries.FirstOrDefault(e => e.Page.Id == page.Id &&
+                  !ReferenceEquals(e, except) &&
+                  string.Equals(e.Name, name, StringComparison.CurrentCultureIgnoreCase));
+
+    // Writes the page the display sits on: refreshes the scraped fields (a
+    // re-read may genuinely improve them - the /de/ fix did) and stores the
+    // user's Seite. Page changes commit HERE only, never on Lesen.
+    StoredPage CommitPage(MatriculaInfo info, string seite)
+    {
+        var updated = info with { Page = seite.Length == 0 ? null : seite };
+
+        // Which page object are we writing to? The bound finding's page when
+        // editing one, else an existing page with this identity, else a new one.
+        var target = _boundEntry?.Page ?? FindPage(updated) ?? new StoredPage(Guid.NewGuid(), updated);
+        target = target with { Info = updated };
+        UpsertPage(target);
+
+        // On ARCHION the identity DEPENDS on the mutable Seite, so correcting
+        // it can collide with a page already holding that number. Same
+        // physical page - merge rather than keep two.
+        string? identity = target.Identity;
+        if (identity is not null)
+        {
+            var rival = _pages.FirstOrDefault(p => p.Id != target.Id && p.Identity == identity);
+            if (rival is not null)
+            {
+                target = MergePages(target, rival);
+            }
+        }
+        return target;
+    }
+
+    // Moves every finding off `drop` onto `keep`, then discards `drop`.
+    // `keep` is the page being edited, so it carries the freshest scrape.
+    StoredPage MergePages(StoredPage keep, StoredPage drop)
+    {
+        int moved = 0;
+        foreach (var entry in SavedEntries.Where(e => e.Page.Id == drop.Id).ToList())
+        {
+            entry.Update(entry.Finding with { PageId = keep.Id }, keep);
+            moved++;
+        }
+        _pages.RemoveAll(p => p.Id == drop.Id);
+        StatusText = $"Seite {keep.Seite} mit vorhandener Seite zusammengeführt – {moved} Funde übernommen.";
+        return keep;
+    }
+
+    // Replaces the stored page with the same Id, or adds it. Also refreshes
+    // the Page reference every affected list row holds, so the grid's
+    // Info.* columns follow a corrected Seite immediately.
+    void UpsertPage(StoredPage page)
+    {
+        int i = _pages.FindIndex(p => p.Id == page.Id);
+        if (i < 0)
+        {
+            _pages.Add(page);
+            return;
+        }
+        _pages[i] = page;
+        foreach (var entry in SavedEntries.Where(e => e.Page.Id == page.Id).ToList())
+        {
+            entry.Update(entry.Finding, page);
+        }
     }
 
     // Saved finds can represent years of research - a failed write must
     // never pass silently (unlike the best-effort format settings).
     void PersistEntries()
     {
+        // Never write over a library we failed to parse.
+        if (_storageUnreadable)
+        {
+            return;
+        }
         try
         {
-            SavedEntryStore.Save(SavedEntries.Select(e => e.Record));
+            LibraryStore.Save(_pages, SavedEntries.Select(e => e.Finding));
         }
         catch (Exception ex)
         {
@@ -614,7 +866,7 @@ class MainViewModel : INotifyPropertyChanged
         try
         {
             EntryCsvExporter.Export(
-                SavedEntries.Select(e => e.Record), dialog.FileName,
+                SavedEntries.Select(e => e.Entry), dialog.FileName,
                 _selectedSourceFormat, _selectedCitationFormat);
             StatusText = $"{SavedEntries.Count} Einträge exportiert nach {dialog.FileName}";
         }
@@ -659,7 +911,7 @@ class MainViewModel : INotifyPropertyChanged
 
         try
         {
-            BibTexExporter.Export(SavedEntries.Select(e => e.Record), dialog.FileName, bibFormat);
+            BibTexExporter.Export(SavedEntries.Select(e => e.Entry), dialog.FileName, bibFormat);
             StatusText = $"BibTeX-Bibliothek exportiert nach {dialog.FileName}";
         }
         catch (Exception ex)
@@ -859,7 +1111,6 @@ class MainViewModel : INotifyPropertyChanged
         {
             _currentInfo = _currentInfo with { Page = page };
         }
-        InvalidateDuplicateCheck();
         SourceText = CitationTemplateEngine.Render(_selectedSourceFormat, DisplayedInfo);
         PageCitationText = CitationTemplateEngine.Render(_selectedCitationFormat, DisplayedInfo);
     }

@@ -20,13 +20,17 @@ static class BibTexExporter
     // The cite key: between "@type{" and the first comma of the entry.
     static readonly Regex KeyPattern = new(@"(?<prefix>@\w+\{)(?<key>[^,\r\n]+)");
 
-    public static void Export(IEnumerable<SavedRecord> records, string path, CitationStyle bibFormat)
+    public static void Export(IEnumerable<LibraryEntry> records, string path, CitationStyle bibFormat)
     {
-        // One entry per unique book: group by the book URL (the page-less
-        // book identity); a URL-less find falls back to its own id so it is
-        // never merged with another. Render each book once.
+        // One entry per unique book: group by BookKey (the normalized,
+        // page-less book identity - so the same book read in German and in
+        // English collapses into one @misc instead of two); a find with no
+        // book URL falls back to its own id so it is never merged with
+        // another. Render each book once.
         var entries = records
-            .GroupBy(r => string.IsNullOrEmpty(r.Info.BookUrl) ? r.Id.ToString() : r.Info.BookUrl)
+            .GroupBy(r => string.IsNullOrEmpty(r.Info.BookKey)
+                ? r.Finding.Id.ToString()
+                : r.Info.BookKey)
             .Select(g => CitationTemplateEngine.Render(bibFormat, g.First().Info).Trim())
             .Where(text => text.Length > 0)
             .Distinct()

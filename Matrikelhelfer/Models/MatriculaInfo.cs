@@ -72,6 +72,67 @@ record MatriculaInfo(
         }
     }
 
+    // Canonical "is this the same book?" key, derived from BookUrl. Used ONLY
+    // for comparison - never displayed, never stored as a link, because it is
+    // deliberately lossy. Url/PageUrl keep whatever the user actually opened.
+    //
+    // The language segment is neutralized because we keep links in the user's
+    // language (an English reader gets /en/ links), so the SAME book yields
+    // different BookUrls per reader and raw string comparison would under-merge.
+    //
+    // Query params are DROPPED except the DFG viewer's tx_dlf[id]: everything
+    // else there is view state that varies between visits to the same book
+    // (`id=9`, `tx_dlf[double]=0`, `cHash`, the page). Real saved data had two
+    // finds in one book whose URLs differed only by `id=9` vs
+    // `tx_dlf[double]=0` - sorting params would still have split them into two
+    // books. tx_dlf[id] must survive because every DFG book shares the path
+    // "/show", so the path alone identifies nothing; it is unescaped first
+    // since browsers deliver it either raw or percent-encoded.
+    [JsonIgnore]
+    public string BookKey => NormalizeBookUrl(BookUrl);
+
+    const string DfgBookParam = "tx_dlf[id]";
+
+    static readonly string[] LanguageSegments = ["de", "en"];
+
+    static string NormalizeBookUrl(string bookUrl)
+    {
+        if (string.IsNullOrWhiteSpace(bookUrl))
+        {
+            return "";
+        }
+        if (!Uri.TryCreate(bookUrl, UriKind.Absolute, out var uri))
+        {
+            return bookUrl.Trim().ToLowerInvariant();
+        }
+
+        string host = uri.Host.ToLowerInvariant();
+        if (host.StartsWith("www.", StringComparison.Ordinal))
+        {
+            host = host[4..];
+        }
+
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length > 0 && LanguageSegments.Contains(segments[0].ToLowerInvariant()))
+        {
+            segments[0] = "*";
+        }
+
+        string book = "";
+        foreach (var part in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = part.IndexOf('=');
+            if (eq > 0 &&
+                Uri.UnescapeDataString(part[..eq]).Equals(DfgBookParam, StringComparison.OrdinalIgnoreCase))
+            {
+                book = "?" + Uri.UnescapeDataString(part[(eq + 1)..]);
+                break;
+            }
+        }
+
+        return $"https://{host}/{string.Join('/', segments)}{book}";
+    }
+
     static bool IsPageParam(string param) =>
         param.StartsWith("pg=") ||
         param.StartsWith("tx_dlf[page]=") ||

@@ -262,7 +262,7 @@
                     <DataGridTextColumn Header="Buch" Binding="{Binding Info.CitationTitle}" Width="Auto" />
                     <DataGridTextColumn Header="Seite" Binding="{Binding Info.PageDescription}" Width="Auto" />
                     <DataGridTextColumn Header="Gespeichert" Width="Auto" SortDirection="Descending"
-                                        Binding="{Binding Record.SavedAt, StringFormat='{}{0:dd.MM.yyyy}'}" />
+                                        Binding="{Binding SavedAt, StringFormat='{}{0:dd.MM.yyyy}'}" />
                     <!-- Inline delete: a trash button that appears only while
                          its row is hovered (Visibility=Hidden keeps the
                          column width stable so rows don't shift). It deletes
