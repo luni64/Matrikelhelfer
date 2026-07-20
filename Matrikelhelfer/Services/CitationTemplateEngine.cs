@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using Matrikelhelfer.Models;
 
 namespace Matrikelhelfer.Services;
@@ -94,12 +96,67 @@ static class CitationTemplateEngine
             ["AccessDate"] = accessDate,
         };
 
-        string result = style.Template;
-        foreach (var (key, value) in values)
+        // One regex pass, so a token can carry a modifier ({Signatur:clean}).
+        // An unknown name (or literal BibTeX braces like "{Anna Maier}") is
+        // left exactly as written - only recognized {Token}s are substituted.
+        return TokenPattern.Replace(style.Template, match =>
         {
-            result = result.Replace("{" + key + "}", value);
+            if (!values.TryGetValue(match.Groups["name"].Value, out var value))
+            {
+                return match.Value;
+            }
+            return match.Groups["mod"].Value switch
+            {
+                "clean" => CleanForKey(value),
+                _ => value,
+            };
+        });
+    }
+
+    // {Name} or {Name:modifier}. Name starts with a letter and may contain
+    // hyphens (Scan-Nr, Scan-ID); the modifier is a short lowercase word.
+    static readonly Regex TokenPattern =
+        new(@"\{(?<name>[A-Za-z][A-Za-z-]*)(?::(?<mod>[a-z]+))?\}", RegexOptions.Compiled);
+
+    // The :clean modifier - turns a field value into a safe identifier
+    // fragment (its use is a BibTeX/LaTeX cite key). German umlauts are
+    // transliterated (ä→ae …), any other accent is stripped to its base
+    // letter (é→e), then every run of non-key characters becomes a single '_'.
+    // Hyphens are KEPT: real signatures use them ("3-01"), and keeping them
+    // means '_' only ever marks where spaces/commas/periods were cleaned. An
+    // empty (or all-cleaned-away) value becomes the literal "EMPTY" so a
+    // missing field is a visible, greppable marker in the .bib key
+    // (e.g. "Bromskirchen_EMPTY") rather than a silent trailing '_'.
+    const string EmptyMarker = "EMPTY";
+
+    static string CleanForKey(string value)
+    {
+        var pre = new StringBuilder(value.Length);
+        foreach (char c in value)
+        {
+            pre.Append(c switch
+            {
+                'ä' => "ae", 'ö' => "oe", 'ü' => "ue",
+                'Ä' => "Ae", 'Ö' => "Oe", 'Ü' => "Ue",
+                'ß' => "ss",
+                _ => c.ToString(),
+            });
         }
-        return result;
+
+        // Decompose remaining accented letters and drop the combining marks
+        // (é -> e), so nothing non-ASCII survives into the key.
+        string decomposed = pre.ToString().Normalize(NormalizationForm.FormD);
+        var ascii = new StringBuilder(decomposed.Length);
+        foreach (char c in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            {
+                ascii.Append(c);
+            }
+        }
+
+        string cleaned = Regex.Replace(ascii.ToString(), "[^A-Za-z0-9-]+", "_").Trim('_', '-');
+        return cleaned.Length == 0 ? EmptyMarker : cleaned;
     }
 
     // Shown in the template editor so a user writing their own template
