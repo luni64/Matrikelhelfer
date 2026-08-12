@@ -902,17 +902,49 @@ class MainViewModel : INotifyPropertyChanged
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
             FileName = $"Kirchenbuch-Bibliothek_{DateTime.Now:yyyy-MM-dd}.bib",
-            Filter = "BibTeX-Datei|*.bib|Alle Dateien|*.*"
+            Filter = "BibTeX-Datei|*.bib|Alle Dateien|*.*",
+            // Appending to an existing .bib is a normal choice here, not an
+            // accident - so ask our own question below instead of letting the
+            // dialog's generic "overwrite?" frame it as a mistake.
+            OverwritePrompt = false
         };
         if (dialog.ShowDialog() != true)
         {
             return;
         }
 
+        bool append = false;
+        if (File.Exists(dialog.FileName) && new FileInfo(dialog.FileName).Length > 0)
+        {
+            var answer = ChoiceWindow.Ask(
+                "Datei vorhanden",
+                $"Die Datei „{Path.GetFileName(dialog.FileName)}“ enthält bereits Einträge.\n\n" +
+                "„Anhängen“ ergänzt nur Bücher, die noch nicht enthalten sind; vorhandene " +
+                "Einträge bleiben unverändert. „Ersetzen“ schreibt die Datei komplett neu.",
+                "Anhängen", "Ersetzen");
+            if (answer == ChoiceResult.Cancel)
+            {
+                return;
+            }
+            append = answer == ChoiceResult.Primary;
+        }
+
         try
         {
-            BibTexExporter.Export(SavedEntries.Select(e => e.Entry), dialog.FileName, bibFormat);
-            StatusText = $"BibTeX-Bibliothek exportiert nach {dialog.FileName}";
+            var report = BibTexExporter.Export(
+                SavedEntries.Select(e => e.Entry), dialog.FileName, bibFormat, append);
+
+            string summary = append
+                ? $"{report.Added.Count} neue Einträge angehängt, {report.Skipped.Count} bereits vorhanden"
+                : $"{report.Added.Count} Einträge geschrieben";
+            if (report.Warnings.Count > 0)
+            {
+                summary += $", {report.Warnings.Count} Warnung(en)";
+            }
+            summary += report.LogError is null
+                ? " – Details im Protokoll neben der Datei."
+                : $" (Protokoll nicht schreibbar: {report.LogError})";
+            StatusText = summary;
         }
         catch (Exception ex)
         {

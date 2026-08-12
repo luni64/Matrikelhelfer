@@ -95,7 +95,9 @@ record MatriculaInfo(
 
     static readonly string[] LanguageSegments = ["de", "en"];
 
-    static string NormalizeBookUrl(string bookUrl)
+    // Public so the BibTeX exporter can normalize the url= fields it reads
+    // back out of an existing .bib the same way, and actually match them.
+    public static string NormalizeBookUrl(string bookUrl)
     {
         if (string.IsNullOrWhiteSpace(bookUrl))
         {

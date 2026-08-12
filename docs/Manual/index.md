@@ -232,6 +232,19 @@ Das **@-Symbol** über der Liste schreibt alle gespeicherten Funde in eine `.bib
 
 Der **Zitierschlüssel** (`Waging_am_See-St_Martin_CB481_M7658`) beginnt mit der Pfarrei, damit Sie in einem Text sofort erkennen, worauf sich eine Zitierung bezieht – Signaturen kennt niemand auswendig. Die Schlüssel sind eindeutig; bei Bedarf können Sie sie in Ihrer `.bib`-Datei natürlich beliebig umbenennen.
 
+**An eine vorhandene Datei anhängen.** Wählen Sie beim Export eine bereits vorhandene `.bib`-Datei aus, fragt die App, ob sie **angehängt** oder **ersetzt** werden soll. Beim Anhängen bleibt der bestehende Inhalt vollständig unverändert – auch von Hand geschriebene Einträge und andere Quellenarten – und es werden nur Bücher ergänzt, die noch nicht enthalten sind. So können Sie Ihre Bibliothek nach und nach erweitern, statt sie jedes Mal neu zu schreiben.
+
+Ob ein Buch bereits enthalten ist, erkennt die App am Link (`url`) und am Zitierschlüssel. Der Link hat dabei Vorrang – Sie können die Schlüssel in Ihrer Datei also umbenennen, ohne dass Einträge doppelt angelegt werden.
+
+**Das Export-Protokoll.** Bei jedem Export legt die App zusätzlich die Datei **`Matrikelhelfer_Export.log`** neben der `.bib`-Datei an. Sie wird bei jedem Lauf um einen datierten Abschnitt ergänzt und hält fest:
+
+- welche Einträge **neu hinzugekommen** sind,
+- welche **bereits vorhanden** waren – und woran sie erkannt wurden,
+- ob ein Zitierschlüssel **umbenannt** werden musste, weil er bereits vergeben war,
+- Warnungen, etwa wenn ein Buch keine Signatur hat und der Schlüssel deshalb auf `_EMPTY` endet.
+
+Besonders der Hinweis auf umbenannte Schlüssel ist wichtig: Ein `\cite`-Verweis in einem bestehenden Dokument geht sonst ins Leere. In einer über Jahre gewachsenen Bibliothek ist das Protokoll der schnellste Weg, solche Stellen zu finden.
+
 **In Word (und anderen Textverarbeitungen) verwenden.** `.bib`-Dateien werden meist über ein **Literaturverwaltungs-Programm** eingebunden, das die Verbindung zur Textverarbeitung herstellt:
 
 - **Zotero**, **JabRef** oder **Mendeley** – importieren die `.bib`-Datei und bringen Zusatzmodule für **Microsoft Word**, **LibreOffice Writer** und **Google Docs** mit, mit denen Sie Quellen einfügen und ein Literaturverzeichnis erzeugen.
