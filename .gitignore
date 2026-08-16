@@ -18,3 +18,6 @@
 
 # Installer: generated from WHATS_NEW.template by ISCC at compile time
 /installer/WHATS_NEW.txt
+
+# Python bytecode (gramps-addon, spike)
+__pycache__/
