@@ -25,8 +25,9 @@ import unittest
 from gi.repository import GLib
 
 from gramps.gen.db import DbTxn
-from gramps.gen.lib import (ChildRef, Date, Event, EventRef, EventType,
-                            Family, Name, Person, Place, PlaceName, Surname)
+from gramps.gen.lib import (ChildRef, Date, Event, EventRef, EventRoleType,
+                            EventType, Family, Name, Person, Place, PlaceName,
+                            Surname)
 from gramps.gui.plug import tool
 
 # the bridge addon's directory is only put on sys.path when Gramps loads
@@ -120,21 +121,43 @@ class MHBridgeTestTool(tool.Tool):
                                place.get_handle())
             anna = make_person("Anna", "Meier", Person.FEMALE, 1810)
             georg = make_person("Georg", "Meier", Person.MALE, 1750)
+            maria = make_person("Maria", "Huber", Person.FEMALE, 1755)
 
             family = Family()
             family.set_father_handle(georg.get_handle())
+            family.set_mother_handle(maria.get_handle())
             child_ref = ChildRef()
             child_ref.set_reference_handle(hans.get_handle())
             family.add_child_ref(child_ref)
+
+            # family event: marriage 1775 (family events live on the
+            # Family object with role "Family", like the Gramps GUI does)
+            marriage = Event()
+            marriage.set_type(EventType(EventType.MARRIAGE))
+            marriage_date = Date()
+            marriage_date.set(quality=Date.QUAL_NONE, modifier=Date.MOD_NONE,
+                              calendar=Date.CAL_GREGORIAN,
+                              value=(0, 0, 1775, False))
+            marriage.set_date_object(marriage_date)
+            db.add_event(marriage, trans)
+            marriage_ref = EventRef()
+            marriage_ref.set_reference_handle(marriage.get_handle())
+            marriage_ref.set_role(EventRoleType(EventRoleType.FAMILY))
+            family.add_event_ref(marriage_ref)
+            handles["marriage_event"] = marriage.get_handle()
+
             db.add_family(family, trans)
             georg.add_family_handle(family.get_handle())
             db.commit_person(georg, trans)
+            maria.add_family_handle(family.get_handle())
+            db.commit_person(maria, trans)
             hans.add_parent_family_handle(family.get_handle())
             db.commit_person(hans, trans)
 
             handles["hans"] = hans.get_handle()
             handles["anna"] = anna.get_handle()
             handles["georg"] = georg.get_handle()
+            handles["maria"] = maria.get_handle()
             handles["family"] = family.get_handle()
         return handles
 

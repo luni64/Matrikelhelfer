@@ -11,6 +11,17 @@
             "cwd": "${workspaceFolder}\\Matrikelhelfer",
             "stopAtEntry": false,
             "console": "internalConsole"
+        },
+        {
+            "name": "Run GrampsBridgeTester",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build tester",
+            "program": "${workspaceFolder}\\GrampsBridgeTester\\bin\\Debug\\net8.0-windows\\GrampsBridgeTester.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}\\GrampsBridgeTester",
+            "stopAtEntry": false,
+            "console": "internalConsole"
         }
     ]
 }

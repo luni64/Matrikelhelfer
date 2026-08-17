@@ -246,6 +246,8 @@ Vollständigere Sicht für die Detailanzeige im Client: alle Namen, Ereignisse m
 
 Der Rückgabewert enthält je Ereignis ausdrücklich `citation_count`, damit MatrikelHelfer erkennen kann, ob ein Beleg bereits vorhanden ist.
 
+Die Ereignisliste umfasst neben den **Personenereignissen** auch die **Familienereignisse** der Familien, in denen die Person Partner ist (Trauung, Scheidung …) — in Gramps hängen diese am Familienobjekt, nicht an der Person. Jedes Ereignis trägt `scope` (`person` | `family`) und bei Familienereignissen `family_handle`. (Erkenntnis aus dem Sandbox-Test 2026-08-17: ohne dies kann der Client eine vorhandene Trauung weder anzeigen noch als Ziel wählen.)
+
 ### 5.6 `GET /sources` und `GET /repositories`
 
 Suche über Titel bzw. Name, gleiche Parameterlogik wie `/persons` (`q`, `limit`, `offset`).
@@ -315,7 +317,8 @@ Führt die gesamte Erfassung **in einer einzigen Gramps-Transaktion** aus. Das i
 3. Quelle suchen (bevorzugt über Attribut, sonst über Titel); falls nicht vorhanden → anlegen und mit Repository verknüpfen.
 4. Zitat anlegen und mit der Quelle verknüpfen.
 5. Sind `targets` angegeben → Zitat an alle genannten Objekte anhängen.
-6. Sind keine `targets` angegeben und ist `create_event_if_missing` gesetzt → Ereignis anlegen, der Person mit angegebener Rolle zuordnen, Zitat daran hängen.
+6. Sind keine `targets` angegeben und ist `create_event_if_missing` gesetzt → Ereignis anlegen, dem Träger zuordnen, Zitat daran hängen. Träger ist **genau eines** von `person_handle` (Personenereignis, Rollen-Vorgabe `Primary`) oder `family_handle` (Familienereignis wie Trauung, Rollen-Vorgabe `Family`) — Trauungen gehören in Gramps an die Familie, nicht an die Person (Sandbox-Erkenntnis 2026-08-17).
+7. Optionaler Block `person_url` (`{path, description, type}`, Typ-Vorgabe `Digitalisat`): Der Permalink wird zusätzlich als klickbarer Eintrag in den **Internet-Reiter der beteiligten Personen** kopiert — nur Person und Repository haben in Gramps eine klickbare URL-Liste; das Zitat-Attribut `MH_Permalink` ist es nicht (Sandbox-Erkenntnis 2026-08-17). Beteiligte Personen: Ziel-Personen direkt, bei Ziel-Familien und Familienereignissen beide Partner, bei Ziel-Ereignissen die per Rückverweis ermittelten Träger. Dedupliziert über den Pfad — derselbe Link wird nie doppelt angelegt; alles in derselben Transaktion.
 7. Alles innerhalb **einer** `DbTxn` mit sprechendem Namen, z. B. `"MatrikelHelfer: Zitat Pollenfeld Bd. 3 S. 142"`. Bei einem Fehler in Schritt 2–6 wird die gesamte Transaktion verworfen.
 
 **Antwort:**
@@ -430,7 +433,37 @@ MatrikelHelfer vergibt je Kirchenbuchband einen stabilen, deterministischen Schl
 
 Analog kann ein `MH_CitationKey` (abgeleitet aus Quellschlüssel plus Seite/Eintrag) das versehentliche doppelte Erfassen desselben Eintrags erkennbar machen. Der Client sollte in diesem Fall warnen statt stillschweigend erneut anzulegen.
 
-### 7.3 Betriebsarten
+**FA-C6 — Quellen-Vorschau vor der Erfassung** (Erkenntnis aus dem Sandbox-Test 2026-08-17): Vor `POST /capture` fragt der Client die Quelle per `GET /sources?attribute_key=MH_SourceKey&…` ab. Existiert sie bereits und weicht ihr Titel vom aktuell erfassten Buch ab, wird gewarnt (Zitat würde an die *bestehende* Quelle gehängt; `create_if_missing` wird bei Attribut-Treffer ignoriert). Die Capture-Antwort liefert dazu im Quellen-Ergebnis zusätzlich `title`, damit der Client nach der Erfassung anzeigen kann, an welcher Quelle das Zitat wirklich hängt. Der Auslöser bleibt bewusst der Titel allein — beschreibende Felder (Autor, Publikationsangabe) dürfen nach der Anlage in Gramps weitergepflegt werden, ohne Warnungen auszulösen (Gramps ist nach der Anlage Master der Quellenbeschreibung). Vom Anwender bestätigte Schlüssel↔Titel-Paare sollen gemerkt werden (mindestens je Sitzung), damit eine bewusste Umbenennung in Gramps nicht bei jeder Erfassung erneut nachfragt.
+
+### 7.3 Gramps-Modus: UI-Konzept (Stand der Diskussion 2026-08-17)
+
+Ist MatrikelHelfer mit der Bridge verbunden („Gramps-Modus"), ersetzt diese Ansicht das Speichern-Flyout:
+
+![UI-Entwurf Gramps-Modus](images/gramps-mode-ui-draft.png)
+
+**Navigation („begehbarer Baum")**
+Suchfeld (Name + ungefähres Jahr) → Trefferliste → gewählte Person erscheint als Zentrum eines Mini-Stammbaums: Eltern darüber, Partner daneben (mit dessen Eltern), Kinder darunter. **Klick auf eine beliebige Personenbox zentriert den Baum auf diese Person** — der Anwender wandert durch den Baum wie in einer Genealogie-Anwendung (typischer Ablauf: Trauung erfasst → Vater im Eintrag erwähnt → dessen Sterbeeintrag in Matricula gesucht → Vater angeklickt → Fund zugeordnet). Daten je Sprung: ein `GET /persons/{handle}` (plus eines für die Eltern des Partners). Lesender Zugriff; die Suche bleibt als Absprung erhalten.
+
+**Lokale Zuordnungs-Queue (Staging)**
+Das Ziehen des Zitat-Symbols auf Ereignisse/Fakten/Personen sendet **nichts** — es erzeugt eine lokale *Zuordnung* „Fund X belegt Ziel Y". Zuordnungen hängen an **gespeicherten Funden** (`LibraryEntry`); damit ist der Datenstand des Fundes zum Zeitpunkt der Zuordnung eingefroren, auch wenn der Anwender danach weitere Seiten liest. Zuordnungen werden mit der Bibliothek persistiert (`library.json`) und überleben Neustarts. Die Oberfläche unterscheidet sichtbar: **ausstehend** (nur lokal) vs. **hochgeladen** (in Gramps; mit gespeicherten Gramps-IDs aus der Capture-Antwort).
+
+**Upload („An Gramps senden")**
+Ein Klick spielt alle ausstehenden Zuordnungen als Captures ab. v1: sequenziell, je Fund eine Transaktion; fehlgeschlagene Einträge bleiben mit Fehlermarkierung in der Queue. Geplante Ausbaustufe: **Batch-Endpunkt** (`POST /capture-batch`) — der gesamte Upload in *einer* Gramps-Transaktion, ein einziges Undo verwirft die ganze Sitzung.
+
+**Rücklesen nach dem Upload, ohne Sichtsprung**
+Nach dem Upload liest der Client den angezeigten Ausschnitt **vollständig neu** aus Gramps (Detail-Refetch der dargestellten Personen), damit die Anzeige garantiert dem tatsächlichen Gramps-Stand entspricht — einschließlich Änderungen, die der Anwender zwischenzeitlich direkt in Gramps gemacht hat. Da typischerweise *während* der Arbeit gespeichert wird, darf sich der **sichtbare Zustand des Baums dabei nicht ändern**: Zentrum, Layout und Scrollpositionen bleiben erhalten; die frischen Daten fließen in die bestehenden Boxen ein (Aktualisierung statt Neuaufbau — Boxen sind über Handle bzw. temporäre ID identifiziert). Ausstehende Markierungen wechseln **an Ort und Stelle** in den Zustand „hochgeladen"; virtuelle Personen werden nahtlos durch die real angelegten ersetzt (temporäre ID → Handle), ohne dass sich ihre Box bewegt.
+
+**Folge-Effekte des Staging-Modells**
+- **Dublettenschutz löst sich lokal:** Da Funde ihren Upload-Status (inkl. Gramps-IDs) tragen, weiß der Client, was bereits in Gramps ist — `MH_CitationKey`-Prüfungen und URL-Dedup-Heuristiken (vgl. §10.8) werden voraussichtlich überflüssig.
+- **Offline-Modus (§7.3 alt) wird derselbe Mechanismus:** Die Queue füllt sich auch ohne erreichbare Bridge; der Upload erfolgt, sobald Gramps läuft.
+
+**Personen-Anlage (v2, fest eingeplant — Kernworkflow)**
+Kirchenbuch-Durchsicht erzeugt typischerweise Serien von Funden zu **noch nicht erfassten Personen** (z. B. Geschwisterreihen im Taufbuch). Der Umweg „in Gramps Person anlegen → zurück → zuordnen" ist nicht zumutbar. Konzept:
+- „Neu"-Boxen im Baum erzeugen eine **virtuelle Person** (lokaler Stub mit temporärer ID; Name/Geschlecht/Daten aus dem Fund vorbelegt). Virtuelle Personen erscheinen im Baum wie echte und können sofort (auch mehrfach) Zuordnungen erhalten.
+- Beim Upload wird die Abhängigkeitsreihenfolge aufgelöst: zuerst ein Capture mit `create_person`-Block (Person + Familienverknüpfung als Kind/Partner + Ereignis + Zitat in einer Transaktion), danach ersetzen die zurückgemeldeten Handles die temporären IDs in Folge-Zuordnungen.
+- Bridge-Erweiterung: `create_person` in `POST /capture` (Name, Geschlecht, `child_of_family` bzw. `spouse_of`), Antwort enthält `created.person`. Die Bausteine (Person/Name/ChildRef/Family-Commit) sind durch die Testsuite bereits erprobt; v1 der Oberfläche zeigt „Neu"-Boxen deaktiviert.
+
+### 7.4 Betriebsarten
 
 Der Client soll ohne Bridge nutzbar bleiben:
 
@@ -486,6 +519,8 @@ Vollständiger Durchlauf: Person in Gramps vorhanden → Digitalisat in Matricul
 4. **Mehrere Gramps-Instanzen** — mehrere gleichzeitig geöffnete Bäume sind möglich. Discovery-Datei je Instanz oder Liste? (Vorschlag: Dateiname enthält die PID, MatrikelHelfer bietet bei mehreren Treffern eine Auswahl.)
 5. **Konfidenzstufe** — soll MatrikelHelfer sie je Erfassung setzen können oder gilt ein fester Vorgabewert?
 6. **Vererbung an weitere Objekte** — soll ein Taufzitat automatisch auch an den Namen oder die Eltern-Kind-Beziehung gehängt werden können? (Gramps erlaubt es; erhöht aber die Komplexität der Zuordnungs-UI.)
+7. **Adoption vorhandener Quellen ohne Schlüssel** (aus dem Sandbox-Test 2026-08-17): Eine vom Anwender früher von Hand angelegte Quelle für dasselbe Kirchenbuch trägt kein `MH_SourceKey`-Attribut und wird vom Attribut-Match nicht gefunden — die Erfassung legt eine Dublette an. Ein stiller Titel-Fallback wird bewusst abgelehnt (Fehlzuordnung wäre schlimmer als eine sichtbare, in Gramps zusammenführbare Dublette). Vorgesehene Lösung für Stufe 7: „Adoption" — der Client bietet per `GET /sources?q=…` Kandidaten an; bestätigt der Anwender die Identität, stempelt die Bridge das `MH_SourceKey`-Attribut einmalig auf die bestehende Quelle. Das ist eine eng begrenzte Ausnahme vom Grundsatz „keine Bearbeitung bestehender Objekte" (§2.2) und braucht einen eigenen Endpunkt (nur Attribut hinzufügen, sonst nichts).
+8. **Dedup von Personen-URLs und Zitaten** (2026-08-17): Aktuell dedupliziert `person_url` über Pfad+Beschreibung (je Ereignis eine Zeile im Internet-Reiter; dieselbe Seite darf mehrere Ereignisse belegen). Offen, ob dieser Schutz — wie auch der geplante `MH_CitationKey`-Abgleich — dauerhaft nötig ist: Mit der lokalen Zuordnungs-Queue (§7.3) kennt der Client den Upload-Status jedes Fundes und verhindert Doppel-Uploads selbst. Entscheidung zurückgestellt, bis der Gramps-Modus im echten Client steht.
 
 ---
 

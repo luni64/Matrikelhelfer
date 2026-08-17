@@ -16,6 +16,19 @@
                 "kind": "build",
                 "isDefault": true
             }
+        },
+        {
+            "label": "build tester",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "${workspaceFolder}\\GrampsBridgeTester\\GrampsBridgeTester.csproj",
+                "/property:GenerateFullPaths=true",
+                "/consoleloggerparameters:NoSummary"
+            ],
+            "problemMatcher": "$msCompile",
+            "group": "build"
         }
     ]
 }

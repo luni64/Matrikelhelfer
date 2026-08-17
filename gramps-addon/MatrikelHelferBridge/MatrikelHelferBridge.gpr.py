@@ -17,11 +17,32 @@ register(
     ),
     status=STABLE,
     fname="MatrikelHelferBridge.py",
-    version="0.4.0",
+    version="0.7.2",
     gramps_target_version="6.0",
     gramplet="MatrikelHelferBridgeGramplet",
     gramplet_title="MatrikelHelfer Bridge",
     authors=["luni64"],
     height=260,
+    expand=True,
+)
+
+register(
+    GRAMPLET,
+    id="MHBridgeLinks",
+    name="MatrikelHelfer Digitalisate",
+    description=(
+        "Clickable links to the church-book scans (MH_Permalink) of the "
+        "active person's citations, grouped by event. The same scan "
+        "appears under every event it backs."
+    ),
+    status=STABLE,
+    fname="mhbridge_links.py",
+    version="0.7.2",
+    gramps_target_version="6.0",
+    gramplet="MHBridgeLinksGramplet",
+    gramplet_title="Digitalisate",
+    authors=["luni64"],
+    navtypes=["Person"],
+    height=200,
     expand=True,
 )

@@ -7,10 +7,11 @@ CTX is filled by the tool before the suite runs: dbstate, service,
 handles (seeded objects), port, token.
 
 Seeded data (after wipe):
-  persons:  Hans Meier  *1780 (Baptism in Testheim), child of Georg
+  persons:  Hans Meier  *1780 (Baptism in Testheim), child of Georg+Maria
             Anna Meier  *1810 (Baptism, no place)
             Georg Meier *1750 (Baptism, no place)
-  1 place "Testheim", 1 family (Georg -> Hans)
+            Maria Huber *1755 (Baptism, no place)
+  1 place "Testheim", 1 family (Georg + Maria -> Hans, Marriage 1775)
   no sources / citations / repositories / notes
 
 Tests are order-dependent (numbered): capture tests build on each other.
@@ -21,6 +22,7 @@ import unittest
 import urllib.error
 import urllib.request
 
+from mhbridge_links import collect_scan_links
 from mhbridge_service import run_in_main
 
 CTX = {}
@@ -179,8 +181,10 @@ class BridgeApiTests(unittest.TestCase):
         status, body = get("/persons?given=hans")
         self.assertEqual(status, 200)
         parents = body["results"][0]["parents"]
-        self.assertEqual(len(parents), 1)
-        self.assertIn("Georg", parents[0]["primary_name"])
+        self.assertEqual(len(parents), 2)
+        names = " / ".join(p["primary_name"] for p in parents)
+        self.assertIn("Georg", names)
+        self.assertIn("Maria", names)
 
     def test_056_bad_int_param(self):
         status, body = get("/persons?birth_year_from=abc")
@@ -196,7 +200,7 @@ class BridgeApiTests(unittest.TestCase):
         self.assertEqual(event["type"], "Baptism")
         self.assertEqual(event["citation_count"], 0)
         self.assertEqual(event["place"], "Testheim")
-        self.assertEqual(len(body["parents"]), 1)
+        self.assertEqual(len(body["parents"]), 2)
 
     def test_061_person_detail_unknown(self):
         status, body = get("/persons/doesnotexist")
@@ -315,6 +319,31 @@ class BridgeApiTests(unittest.TestCase):
         # citations from test_080 and test_081 at this point
         self.assertEqual(sorted(counts), [0, 2])
 
+    # -- port fallback (FA-2) ----------------------------------------
+
+    def test_095_second_service_falls_to_next_port(self):
+        """Windows SO_REUSEADDR regression: a second server must NOT
+        silently double-bind the occupied port (perma-401 split brain);
+        it must fall through to the next free port."""
+        import os
+        import tempfile
+        from mhbridge_service import BridgeService
+
+        def start_second():
+            second = BridgeService(
+                CTX["dbstate"],
+                discovery_file=os.path.join(
+                    tempfile.gettempdir(), "mhbridge_test_endpoint2.json"))
+            second.refresh_session(new_session=True)
+            second.start(CTX["port"])   # base port is already taken
+            port, running = second.port, second.running
+            second.stop()
+            return port, running
+
+        port, running = in_main(start_second)
+        self.assertTrue(running)
+        self.assertEqual(port, CTX["port"] + 1)
+
     # -- undo (T-06) -------------------------------------------------
 
     def test_090_undo_reverts_last_capture(self):
@@ -326,3 +355,155 @@ class BridgeApiTests(unittest.TestCase):
         citations = in_main(lambda: db().get_event_from_handle(
             CTX["event_080"]).get_citation_list())
         self.assertEqual(citations, [CTX["citation_080"]])
+
+    # -- family events (Marriage etc.) -------------------------------
+
+    def test_105_detail_includes_family_events(self):
+        status, body = get("/persons/" + CTX["handles"]["georg"])
+        self.assertEqual(status, 200)
+        family_events = [e for e in body["events"] if e["scope"] == "family"]
+        self.assertEqual(len(family_events), 1)
+        self.assertEqual(family_events[0]["type"], "Marriage")
+        self.assertEqual(family_events[0]["family_handle"],
+                         CTX["handles"]["family"])
+        # personal events keep their scope too
+        self.assertTrue(all(e["scope"] == "person"
+                            for e in body["events"] if e["type"] == "Baptism"))
+
+    def test_110_capture_creates_family_event(self):
+        payload = capture_payload("req-110", create_event_if_missing={
+            "family_handle": CTX["handles"]["family"],
+            "event_type": "Marriage",
+            "date": {"type": "regular", "year": 1775, "month": 5, "day": 2},
+            "description": "Trauung laut Matrikel",
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["attached_to"][0]["type"], "event")
+        event_handle = body["created"]["event"]["handle"]
+        refs = in_main(lambda: [
+            (ref.ref, str(ref.get_role())) for ref in
+            db().get_family_from_handle(
+                CTX["handles"]["family"]).get_event_ref_list()])
+        self.assertIn((event_handle, "Family"), refs)
+        self.assertEqual(len(refs), 2)  # seeded marriage + captured one
+
+    def test_111_create_event_rejects_ambiguous_owner(self):
+        payload = capture_payload("req-111", create_event_if_missing={
+            "person_handle": CTX["handles"]["anna"],
+            "family_handle": CTX["handles"]["family"],
+            "event_type": "Marriage",
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "INVALID_REQUEST")
+
+    # -- permalink on the person's Internet tab (person_url) ---------
+
+    def test_120_person_url_added_to_involved_persons(self):
+        payload = capture_payload("req-120", create_event_if_missing={
+            "family_handle": CTX["handles"]["family"],
+            "event_type": "Marriage",
+            "date": {"type": "regular", "year": 1775},
+        }, person_url={
+            "path": "https://data.matricula-online.eu/de/permalink-120",
+            "description": "Trauung 1775",
+            "type": "Digitalisat",
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 200, body)
+        results = body["created"]["person_urls"]
+        # BOTH partners of the family get the link (bride and groom)
+        self.assertEqual([r["was_existing"] for r in results],
+                         [False, False])
+        names = " / ".join(r["name"] for r in results)
+        self.assertIn("Georg", names)
+        self.assertIn("Maria", names)
+        for person_key in ("georg", "maria"):
+            urls = in_main(lambda key=person_key: [
+                (u.get_path(), str(u.get_type()), u.get_description())
+                for u in db().get_person_from_handle(
+                    CTX["handles"][key]).get_url_list()])
+            self.assertIn(
+                ("https://data.matricula-online.eu/de/permalink-120",
+                 "Digitalisat", "Trauung 1775"), urls)
+
+    def test_121_person_url_not_duplicated(self):
+        payload = capture_payload("req-121", targets=[
+            {"type": "event", "handle": CTX["event_080"]}],
+            person_url={
+                "path": "https://data.matricula-online.eu/de/permalink-121",
+                "description": "Taufe 1810",
+                "type": "Digitalisat",
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 200, body)
+        first = body["created"]["person_urls"]
+        self.assertEqual([r["was_existing"] for r in first], [False])
+
+        payload2 = capture_payload("req-121b", targets=[
+            {"type": "event", "handle": CTX["event_080"]}],
+            person_url={
+                "path": "https://data.matricula-online.eu/de/permalink-121",
+                "description": "Taufe 1810",
+                "type": "Digitalisat",
+        })
+        status, body2 = post("/capture", payload2)
+        self.assertEqual(status, 200, body2)
+        self.assertEqual([r["was_existing"]
+                          for r in body2["created"]["person_urls"]], [True])
+        count = in_main(lambda: sum(
+            1 for u in db().get_person_from_handle(
+                CTX["handles"]["anna"]).get_url_list()
+            if u.get_path().endswith("permalink-121")))
+        self.assertEqual(count, 1)
+
+    def test_122_same_link_new_event_gets_own_row(self):
+        """One scan backs several events: the SAME url with a DIFFERENT
+        description (= different event) must create a second Internet
+        row - dedup is per event (path+description), not per url."""
+        payload = capture_payload("req-122", targets=[
+            {"type": "event", "handle": CTX["event_080"]}],
+            person_url={
+                "path": "https://data.matricula-online.eu/de/permalink-121",
+                "description": "Wohnort 1810",
+                "type": "Digitalisat",
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 200, body)
+        self.assertEqual([r["was_existing"]
+                          for r in body["created"]["person_urls"]], [False])
+        rows = in_main(lambda: [
+            (u.get_path(), u.get_description())
+            for u in db().get_person_from_handle(
+                CTX["handles"]["anna"]).get_url_list()
+            if u.get_path().endswith("permalink-121")])
+        self.assertEqual(sorted(r[1] for r in rows),
+                         ["Taufe 1810", "Wohnort 1810"])
+
+    # -- Digitalisate gramplet data (citation-driven, NOT deduplicated)
+
+    def test_130_scan_links_listed_per_event(self):
+        # Anna: seeded baptism (no citations) is skipped; the event from
+        # test_080 now carries four MH_Permalink citations (080, the two
+        # from test_121, one from test_122) - all four must be listed,
+        # same-URL repeats included, because one record can back several
+        # attachments.
+        rows = in_main(lambda: collect_scan_links(
+            db(), CTX["handles"]["anna"]))
+        self.assertEqual(len(rows), 1)
+        links = rows[0]["links"]
+        # every citation carries the template's MH_Permalink (/de/x):
+        # the SAME url must be listed once per citation, not collapsed
+        self.assertEqual([link["url"].endswith("/de/x") for link in links],
+                         [True, True, True, True])
+        self.assertIn("S. 42, Eintrag 7",
+                      [link["label"] for link in links])
+
+        # Georg: marriage citations live on FAMILY events (tests 110/120)
+        rows = in_main(lambda: collect_scan_links(
+            db(), CTX["handles"]["georg"]))
+        family_links = [link for row in rows for link in row["links"]]
+        self.assertGreaterEqual(len(family_links), 2)
+        self.assertTrue(all(link["url"].endswith("/de/x")
+                            for link in family_links))

@@ -42,7 +42,7 @@ from mhbridge_persons import (DEFAULT_LIMIT, MAX_LIMIT, PersonIndex,
 from mhbridge_sources import search_repositories, search_sources
 
 API_VERSION = 1
-ADDON_VERSION = "0.4.0"
+ADDON_VERSION = "0.7.2"
 API_PREFIX = "/api/v1"
 DEFAULT_PORT = 8791
 PORT_SEARCH_RANGE = 20          # FA-2: try DEFAULT_PORT .. +19
@@ -51,6 +51,20 @@ DISCOVERY_DIR = os.path.join(USER_DATA, "matrikelhelfer")
 DISCOVERY_FILE = os.path.join(DISCOVERY_DIR, "endpoint.json")
 
 LOG = logging.getLogger("MatrikelHelferBridge")
+
+
+class ExclusiveHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer without SO_REUSEADDR.
+
+    http.server sets allow_reuse_address, and on Windows SO_REUSEADDR
+    allows binding a port that is ALREADY in active use - a second
+    bridge instance would silently double-bind 8791 instead of falling
+    through to the next free port (FA-2), leaving two servers with two
+    tokens and only one discovery file (symptom: /ping works, everything
+    else 401).
+    """
+
+    allow_reuse_address = False
 
 
 class BridgeError(Exception):
@@ -99,7 +113,7 @@ class BridgeService:
 
     def __init__(self, dbstate, notify=None, discovery_file=None):
         self.dbstate = dbstate
-        self._notify_cb = notify or (lambda: None)
+        self._listeners = [notify] if notify else []
         self.discovery_file = discovery_file or DISCOVERY_FILE
         self._server = None
         self._thread = None
@@ -221,7 +235,7 @@ class BridgeService:
         server = None
         for port in range(base_port, base_port + PORT_SEARCH_RANGE):
             try:
-                server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+                server = ExclusiveHTTPServer(("127.0.0.1", port), handler)
                 self.port = port
                 break
             except OSError:
@@ -307,10 +321,16 @@ class BridgeService:
                                 % (time.strftime("%H:%M:%S"), method, path, status))
         self.notify()
 
+    def add_listener(self, callback):
+        """Register a UI refresh callback (called on the main thread)."""
+        if callback not in self._listeners:
+            self._listeners.append(callback)
+
     def notify(self):
-        """Ask the gramplet to refresh its display (any thread)."""
+        """Ask the gramplet(s) to refresh their display (any thread)."""
         def once():
-            self._notify_cb()
+            for callback in list(self._listeners):
+                callback()
             return False
         GLib.idle_add(once)
 

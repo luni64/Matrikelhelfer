@@ -19,6 +19,7 @@ locale-independent; unknown values silently become custom types.
 import logging
 
 from gramps.gen.db import DbTxn
+from gramps.gen.display.name import displayer as name_displayer
 from gramps.gen.lib import (Citation, Date, Event, EventRef, EventRoleType,
                             EventType, Note, NoteType, RepoRef, Repository,
                             RepositoryType, Source, SourceMediaType,
@@ -128,6 +129,24 @@ def _brief(obj, was_existing):
             "was_existing": was_existing}
 
 
+def _partners(family):
+    return [handle for handle in (family.get_father_handle(),
+                                  family.get_mother_handle()) if handle]
+
+
+def _event_participants(db, event_handle):
+    """Persons carrying the event, incl. partners of carrying families."""
+    recipients = []
+    for class_name, ref_handle in db.find_backlink_handles(
+            event_handle, include_classes=["Person", "Family"]):
+        if class_name == "Person":
+            recipients.append(ref_handle)
+        else:
+            recipients.extend(_partners(
+                db.get_family_from_handle(ref_handle)))
+    return recipients
+
+
 def _get_target(db, target_type, handle):
     """Fetch a citation target; HandleError propagates -> 404 + abort."""
     if target_type == "person":
@@ -189,6 +208,15 @@ def _resolve_repository(db, block, trans, counters):
     return _brief(repository, False), repository.get_handle()
 
 
+def _source_brief(source, was_existing):
+    """Source briefs carry the title so the client can show the user
+    WHICH source a citation was attached to - crucial when an attribute
+    match reuses an existing source and ignores create_if_missing."""
+    brief = _brief(source, was_existing)
+    brief["title"] = source.get_title() or None
+    return brief
+
+
 def _resolve_source(db, block, repository_handle, trans, counters):
     if not block:
         raise InvalidPayload("'source' block is required")
@@ -197,7 +225,7 @@ def _resolve_source(db, block, repository_handle, trans, counters):
         by = match.get("by")
         if by == "handle":
             source = db.get_source_from_handle(match.get("value"))
-            return _brief(source, True), source
+            return _source_brief(source, True), source
         if by == "attribute":
             key, value = match.get("key"), match.get("value")
             if not key or value is None:
@@ -207,14 +235,14 @@ def _resolve_source(db, block, repository_handle, trans, counters):
                 for attribute in source.get_attribute_list():
                     if (str(attribute.get_type()) == key
                             and attribute.get_value() == value):
-                        return _brief(source, True), source
+                        return _source_brief(source, True), source
         elif by == "title":
             wanted = (match.get("value") or "").casefold()
             if not wanted:
                 raise InvalidPayload("source match by title needs 'value'")
             for source in db.iter_sources():
                 if (source.get_title() or "").casefold() == wanted:
-                    return _brief(source, True), source
+                    return _source_brief(source, True), source
         else:
             raise InvalidPayload("source match 'by' must be 'attribute', "
                                  "'title' or 'handle'")
@@ -247,7 +275,7 @@ def _resolve_source(db, block, repository_handle, trans, counters):
         source.add_repo_reference(repo_ref)
     db.add_source(source, trans)
     counters["created"] += 1
-    return _brief(source, False), source
+    return _source_brief(source, False), source
 
 
 # -- the capture itself ----------------------------------------------
@@ -320,6 +348,8 @@ def do_capture(db, payload):
         created["citation"] = _brief(citation, False)
         created["notes"] = note_briefs
 
+        url_recipients = []     # persons who get the permalink (5.7 person_url)
+
         if targets:
             for target in targets:
                 target_type = target.get("type")
@@ -329,11 +359,30 @@ def do_capture(db, payload):
                 attached_to.append({"type": target_type,
                                     "handle": obj.get_handle(),
                                     "gramps_id": obj.get_gramps_id()})
+                if target_type == "person":
+                    url_recipients.append(obj.get_handle())
+                elif target_type == "family":
+                    url_recipients.extend(_partners(obj))
+                else:
+                    url_recipients.extend(
+                        _event_participants(db, obj.get_handle()))
         else:
             event_spec = payload.get("create_event_if_missing")
             if event_spec:
-                person = db.get_person_from_handle(
-                    event_spec.get("person_handle"))
+                person_handle = event_spec.get("person_handle")
+                family_handle = event_spec.get("family_handle")
+                if bool(person_handle) == bool(family_handle):
+                    raise InvalidPayload(
+                        "create_event_if_missing needs exactly one of "
+                        "person_handle or family_handle (family events "
+                        "like Marriage belong on the family)")
+                if person_handle:
+                    owner = db.get_person_from_handle(person_handle)
+                    default_role = "Primary"
+                else:
+                    owner = db.get_family_from_handle(family_handle)
+                    default_role = "Family"
+
                 event = Event()
                 event.set_type(_set_type(EventType(),
                                          event_spec.get("event_type")))
@@ -355,12 +404,49 @@ def do_capture(db, payload):
                 event_ref.set_reference_handle(event.get_handle())
                 event_ref.set_role(_set_type(EventRoleType(),
                                              event_spec.get("role")
-                                             or "Primary"))
-                person.add_event_ref(event_ref)
-                db.commit_person(person, trans)
+                                             or default_role))
+                owner.add_event_ref(event_ref)
+                if person_handle:
+                    db.commit_person(owner, trans)
+                    url_recipients.append(person_handle)
+                else:
+                    db.commit_family(owner, trans)
+                    url_recipients.extend(_partners(owner))
                 attached_to.append({"type": "event",
                                     "handle": event.get_handle(),
                                     "gramps_id": event.get_gramps_id()})
+
+        person_url = payload.get("person_url")
+        if person_url:
+            path = person_url.get("path")
+            if not path:
+                raise InvalidPayload("person_url needs 'path'")
+            url_results = []
+            description = person_url.get("description") or ""
+            for handle in dict.fromkeys(url_recipients):  # dedup, keep order
+                person = db.get_person_from_handle(handle)
+                entry = {"handle": handle,
+                         "gramps_id": person.get_gramps_id(),
+                         "name": name_displayer.display(person)}
+                # one Internet row PER EVENT: the description carries the
+                # event label, so the dedup key is path+description - the
+                # same scan may legitimately appear on several rows (one
+                # record backs marriage, residence, occupation, ...), but
+                # re-capturing the same event never piles up duplicates
+                if any(u.get_path() == path
+                       and u.get_description() == description
+                       for u in person.get_url_list()):
+                    url_results.append(entry | {"was_existing": True})
+                    continue
+                url = Url()
+                url.set_path(path)
+                url.set_description(description)
+                url.set_type(_set_type(UrlType(),
+                                       person_url.get("type") or "Digitalisat"))
+                person.add_url(url)
+                db.commit_person(person, trans)
+                url_results.append(entry | {"was_existing": False})
+            created["person_urls"] = url_results
 
     response = {
         "request_id": payload.get("request_id"),

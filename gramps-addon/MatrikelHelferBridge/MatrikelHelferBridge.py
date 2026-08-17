@@ -17,11 +17,21 @@ from gramps.gen.plug import Gramplet
 
 from mhbridge_service import DEFAULT_PORT, BridgeService
 
+# One service per Gramps process. Gramps may instantiate the gramplet
+# more than once (layout restore, re-added tile); a second instance must
+# adopt the running service instead of starting a rival server - two
+# servers meant two tokens but only one discovery file (perma-401).
+_SERVICE = None
+
 
 class MatrikelHelferBridgeGramplet(Gramplet):
 
     def init(self):
-        self.service = BridgeService(self.dbstate, notify=self._refresh)
+        global _SERVICE
+        if _SERVICE is None:
+            _SERVICE = BridgeService(self.dbstate)
+        self.service = _SERVICE
+        self.service.add_listener(self._refresh)
         root = self._build_gui()
         container = self.gui.get_container_widget()
         container.remove(self.gui.textview)
@@ -34,7 +44,10 @@ class MatrikelHelferBridgeGramplet(Gramplet):
             pass
 
         self.service.refresh_session(new_session=True)
-        self.service.start(self._port_spin.get_value_as_int())
+        if self.service.running:
+            self._port_spin.set_value(self.service.port)
+        else:
+            self.service.start(self._port_spin.get_value_as_int())
 
     # -- gramplet hooks (main thread) --------------------------------
 

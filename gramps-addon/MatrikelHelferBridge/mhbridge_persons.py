@@ -216,24 +216,42 @@ def person_detail(db, handle):
             "display": name_displayer.display_name(name) or None,
         })
 
-    events = []
-    for ref in person.get_event_ref_list():
+    def _event_row(event_ref, scope, family_handle=None):
         try:
-            event = db.get_event_from_handle(ref.ref)
+            event = db.get_event_from_handle(event_ref.ref)
         except HandleError:
-            continue
+            return None
         date = event.get_date_object()
-        events.append({
+        return {
             "handle": event.get_handle(),
             "gramps_id": event.get_gramps_id(),
             "type": str(event.get_type()),
-            "role": str(ref.get_role()),
+            "role": str(event_ref.get_role()),
+            "scope": scope,                     # person | family
+            "family_handle": family_handle,
             "date_text": get_date(event) or None,
             "sort_year": (date.get_year() or None) if date else None,
             "place": place_displayer.display_event(db, event) or None,
             "description": event.get_description() or None,
             "citation_count": len(event.get_citation_list()),
-        })
+        }
+
+    events = []
+    for ref in person.get_event_ref_list():
+        row = _event_row(ref, "person")
+        if row:
+            events.append(row)
+    # family events (Marriage etc.) live on the Family object in Gramps;
+    # without them the client could neither see nor target a marriage
+    for fam_handle in person.get_family_handle_list():
+        try:
+            fam = db.get_family_from_handle(fam_handle)
+        except HandleError:
+            continue
+        for ref in fam.get_event_ref_list():
+            row = _event_row(ref, "family", fam_handle)
+            if row:
+                events.append(row)
 
     parents = []
     family_handle = person.get_main_parents_family_handle()
