@@ -24,7 +24,9 @@ public sealed record PingResponse(
 
 public sealed record LifeEvent(string? DateText, int? SortYear, string? Place);
 
-public sealed record PersonBrief(string Handle, string? GrampsId, string? PrimaryName);
+public sealed record PersonBrief(
+    string Handle, string? GrampsId, string? PrimaryName,
+    string? Gender = null, LifeEvent? Birth = null, LifeEvent? Death = null);
 
 public sealed record PersonSummary(
     string Handle, string GrampsId, string PrimaryName,
@@ -61,7 +63,8 @@ public sealed record FamilyInfo(
 public sealed record PersonDetail(
     string Handle, string GrampsId, string PrimaryName, string Gender,
     int CitationCount, List<NameInfo> Names, List<PersonEvent> Events,
-    List<PersonBrief> Parents, List<FamilyInfo> Families);
+    List<PersonBrief> Parents, List<FamilyInfo> Families,
+    LifeEvent? Birth = null, LifeEvent? Death = null);
 
 // ---- /sources, /repositories (5.6) ----------------------------------
 

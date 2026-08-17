@@ -398,6 +398,29 @@ class BridgeApiTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(body["error"]["code"], "INVALID_REQUEST")
 
+    def test_112_targets_combined_with_new_event(self):
+        """One capture: citation attached to an existing event AND a
+        newly created event (one record evidences several facts)."""
+        payload = capture_payload("req-112", targets=[
+            {"type": "event", "handle": CTX["event_080"]}],
+            create_event_if_missing={
+                "person_handle": CTX["handles"]["anna"],
+                "event_type": "Residence",
+                "date": {"type": "regular", "year": 1810},
+                "description": "Wohnort laut Matrikel",
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 200, body)
+        self.assertEqual(len(body["attached_to"]), 2)
+        self.assertIn("event", body["created"])
+        citation_handle = body["created"]["citation"]["handle"]
+        on_existing = in_main(lambda: db().get_event_from_handle(
+            CTX["event_080"]).get_citation_list())
+        on_new = in_main(lambda: db().get_event_from_handle(
+            body["created"]["event"]["handle"]).get_citation_list())
+        self.assertIn(citation_handle, on_existing)
+        self.assertEqual(on_new, [citation_handle])
+
     # -- permalink on the person's Internet tab (person_url) ---------
 
     def test_120_person_url_added_to_involved_persons(self):
@@ -485,18 +508,19 @@ class BridgeApiTests(unittest.TestCase):
 
     def test_130_scan_links_listed_per_event(self):
         # Anna: seeded baptism (no citations) is skipped; the event from
-        # test_080 now carries four MH_Permalink citations (080, the two
-        # from test_121, one from test_122) - all four must be listed,
-        # same-URL repeats included, because one record can back several
+        # test_080 carries five MH_Permalink citations by now (080, two
+        # from 121, one each from 112 and 122), and test_112 added a
+        # Residence event with one more - all must be listed, same-URL
+        # repeats included, because one record can back several
         # attachments.
         rows = in_main(lambda: collect_scan_links(
             db(), CTX["handles"]["anna"]))
-        self.assertEqual(len(rows), 1)
-        links = rows[0]["links"]
+        self.assertEqual(len(rows), 2)
+        links = [link for row in rows for link in row["links"]]
         # every citation carries the template's MH_Permalink (/de/x):
         # the SAME url must be listed once per citation, not collapsed
         self.assertEqual([link["url"].endswith("/de/x") for link in links],
-                         [True, True, True, True])
+                         [True] * 6)
         self.assertIn("S. 42, Eintrag 7",
                       [link["label"] for link in links])
 

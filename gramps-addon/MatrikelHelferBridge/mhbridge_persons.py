@@ -53,6 +53,7 @@ def _event_summary(db, event):
 
 
 def _person_brief(db, handle):
+    """Compact person card: enough for a tree box (name, birth, death)."""
     try:
         person = db.get_person_from_handle(handle)
     except HandleError:
@@ -61,6 +62,9 @@ def _person_brief(db, handle):
         "handle": handle,
         "gramps_id": person.get_gramps_id(),
         "primary_name": name_displayer.display(person),
+        "gender": _gender_code(person.get_gender()),
+        "birth": _event_summary(db, get_birth_or_fallback(db, person)),
+        "death": _event_summary(db, get_death_or_fallback(db, person)),
     }
 
 
@@ -293,6 +297,8 @@ def person_detail(db, handle):
         "gramps_id": person.get_gramps_id(),
         "primary_name": name_displayer.display(person),
         "gender": _gender_code(person.get_gender()),
+        "birth": _event_summary(db, get_birth_or_fallback(db, person)),
+        "death": _event_summary(db, get_death_or_fallback(db, person)),
         "citation_count": len(person.get_citation_list()),
         "names": names,
         "events": events,

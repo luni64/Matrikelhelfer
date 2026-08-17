@@ -366,55 +366,57 @@ def do_capture(db, payload):
                 else:
                     url_recipients.extend(
                         _event_participants(db, obj.get_handle()))
-        else:
-            event_spec = payload.get("create_event_if_missing")
-            if event_spec:
-                person_handle = event_spec.get("person_handle")
-                family_handle = event_spec.get("family_handle")
-                if bool(person_handle) == bool(family_handle):
-                    raise InvalidPayload(
-                        "create_event_if_missing needs exactly one of "
-                        "person_handle or family_handle (family events "
-                        "like Marriage belong on the family)")
-                if person_handle:
-                    owner = db.get_person_from_handle(person_handle)
-                    default_role = "Primary"
-                else:
-                    owner = db.get_family_from_handle(family_handle)
-                    default_role = "Family"
+        # may be combined with targets: one shared citation attached to
+        # existing objects AND a newly created event (the same record
+        # often evidences several facts at once)
+        event_spec = payload.get("create_event_if_missing")
+        if event_spec:
+            person_handle = event_spec.get("person_handle")
+            family_handle = event_spec.get("family_handle")
+            if bool(person_handle) == bool(family_handle):
+                raise InvalidPayload(
+                    "create_event_if_missing needs exactly one of "
+                    "person_handle or family_handle (family events "
+                    "like Marriage belong on the family)")
+            if person_handle:
+                owner = db.get_person_from_handle(person_handle)
+                default_role = "Primary"
+            else:
+                owner = db.get_family_from_handle(family_handle)
+                default_role = "Family"
 
-                event = Event()
-                event.set_type(_set_type(EventType(),
-                                         event_spec.get("event_type")))
-                event_date = build_date(event_spec.get("date"))
-                if event_date is not None:
-                    event.set_date_object(event_date)
-                if event_spec.get("place_handle"):
-                    # validate only - places are referenced, never created
-                    db.get_place_from_handle(event_spec["place_handle"])
-                    event.set_place_handle(event_spec["place_handle"])
-                if event_spec.get("description"):
-                    event.set_description(event_spec["description"])
-                event.add_citation(citation.get_handle())
-                db.add_event(event, trans)
-                counters["created"] += 1
-                created["event"] = _brief(event, False)
+            event = Event()
+            event.set_type(_set_type(EventType(),
+                                     event_spec.get("event_type")))
+            event_date = build_date(event_spec.get("date"))
+            if event_date is not None:
+                event.set_date_object(event_date)
+            if event_spec.get("place_handle"):
+                # validate only - places are referenced, never created
+                db.get_place_from_handle(event_spec["place_handle"])
+                event.set_place_handle(event_spec["place_handle"])
+            if event_spec.get("description"):
+                event.set_description(event_spec["description"])
+            event.add_citation(citation.get_handle())
+            db.add_event(event, trans)
+            counters["created"] += 1
+            created["event"] = _brief(event, False)
 
-                event_ref = EventRef()
-                event_ref.set_reference_handle(event.get_handle())
-                event_ref.set_role(_set_type(EventRoleType(),
-                                             event_spec.get("role")
-                                             or default_role))
-                owner.add_event_ref(event_ref)
-                if person_handle:
-                    db.commit_person(owner, trans)
-                    url_recipients.append(person_handle)
-                else:
-                    db.commit_family(owner, trans)
-                    url_recipients.extend(_partners(owner))
-                attached_to.append({"type": "event",
-                                    "handle": event.get_handle(),
-                                    "gramps_id": event.get_gramps_id()})
+            event_ref = EventRef()
+            event_ref.set_reference_handle(event.get_handle())
+            event_ref.set_role(_set_type(EventRoleType(),
+                                         event_spec.get("role")
+                                         or default_role))
+            owner.add_event_ref(event_ref)
+            if person_handle:
+                db.commit_person(owner, trans)
+                url_recipients.append(person_handle)
+            else:
+                db.commit_family(owner, trans)
+                url_recipients.extend(_partners(owner))
+            attached_to.append({"type": "event",
+                                "handle": event.get_handle(),
+                                "gramps_id": event.get_gramps_id()})
 
         person_url = payload.get("person_url")
         if person_url:

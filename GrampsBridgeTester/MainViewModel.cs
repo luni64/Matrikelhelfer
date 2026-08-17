@@ -1,6 +1,4 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Windows.Input;
 using GrampsBridge;
@@ -8,13 +6,15 @@ using GrampsBridge;
 namespace GrampsBridgeTester;
 
 /// <summary>
-/// Sandbox VM: everything the future MatrikelHelfer integration needs,
-/// but with hand-typed values instead of scraped ones.
+/// Prototype of the "Gramps-Modus" view (spec 7.3): search, walkable
+/// mini-tree, click-to-assign staging queue, batch upload with in-place
+/// read-back. Manual entry fields stand in for scraped data.
 /// </summary>
-public sealed class MainViewModel : INotifyPropertyChanged
+public sealed class MainViewModel : ObservableObject
 {
     private BridgeClient? _client;
-    private CaptureRequest? _lastRequest;
+    private PersonDetail? _centerDetail;
+    private bool _suppressFamilyReload;
 
     public MainViewModel()
     {
@@ -22,27 +22,21 @@ public sealed class MainViewModel : INotifyPropertyChanged
         ConnectCommand = new RelayCommand(async void () => await ConnectAsync());
         SearchCommand = new RelayCommand(async void () => await SearchAsync(),
                                          () => _client is not null);
-        CaptureCommand = new RelayCommand(async void () => await CaptureAsync(),
-                                          () => _client is not null);
-        RepeatCaptureCommand = new RelayCommand(
-            async void () => await RepeatCaptureAsync(),
-            () => _client is not null && _lastRequest is not null);
+        QueueCommand = new RelayCommand(QueueAssignment,
+                                        () => Center is not null);
+        SendCommand = new RelayCommand(async void () => await SendAllAsync(),
+            () => _client is not null
+                  && Queue.Any(a => a.Status == AssignmentStatus.Pending));
+        NavigateCommand = new RelayCommand<PersonBoxVM>(
+            async void (box) => await LoadCenterAsync(box.Handle),
+            box => !box.IsPlaceholder);
+        TogglePersonCommand = new RelayCommand<PersonBoxVM>(
+            box => { box.IsDraftTarget = !box.IsDraftTarget; },
+            box => !box.IsPlaceholder);
+        ToggleFactCommand = new RelayCommand<FactRowVM>(
+            fact => { fact.IsDraftTarget = !fact.IsDraftTarget; });
         SourceKey = DeriveSourceKey(SourceTitle);
         Permalink = ComputePermalink();
-    }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    private void OnChanged([CallerMemberName] string? name = null) =>
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-
-    private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
-    {
-        if (EqualityComparer<T>.Default.Equals(field, value))
-            return false;
-        field = value;
-        OnChanged(name);
-        return true;
     }
 
     // ---- connection --------------------------------------------------
@@ -63,15 +57,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 string.IsNullOrWhiteSpace(DiscoveryPath) ? null : DiscoveryPath);
             if (endpoint is null)
             {
-                ConnectionStatus = "discovery file not found — is Gramps "
-                                   + "running with the bridge gramplet?";
+                ConnectionStatus = "discovery file not found — is Gramps running?";
                 _client = null;
                 return;
             }
             if (!endpoint.IsProcessAlive())
             {
-                ConnectionStatus = $"stale discovery file (pid {endpoint.Pid} "
-                                   + "not running) — start Gramps";
+                ConnectionStatus = $"stale discovery file (pid {endpoint.Pid} dead)";
                 _client = null;
                 return;
             }
@@ -80,9 +72,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             _client = client;
             ConnectionStatus =
                 $"connected: Gramps {ping.GrampsVersion}, addon {ping.AddonVersion}, "
-                + (ping.TreeOpen ? $"tree \"{ping.TreeName}\"" : "NO TREE OPEN")
-                + $", port {endpoint.Port}, session {ping.SessionId[..8]}…";
-            Log("ping", ping);
+                + (ping.TreeOpen ? $"tree \"{ping.TreeName}\"" : "NO TREE OPEN");
         }
         catch (Exception ex)
         {
@@ -91,61 +81,55 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    // ---- person search ----------------------------------------------
+    // ---- search ------------------------------------------------------
 
-    private string _searchSurname = "";
-    public string SearchSurname { get => _searchSurname; set => Set(ref _searchSurname, value); }
-
-    private string _searchGiven = "";
-    public string SearchGiven { get => _searchGiven; set => Set(ref _searchGiven, value); }
-
-    private string _searchQ = "";
-    public string SearchQ { get => _searchQ; set => Set(ref _searchQ, value); }
-
-    private string _searchBirthFrom = "";
-    public string SearchBirthFrom { get => _searchBirthFrom; set => Set(ref _searchBirthFrom, value); }
-
-    private string _searchBirthTo = "";
-    public string SearchBirthTo { get => _searchBirthTo; set => Set(ref _searchBirthTo, value); }
-
-    private string _searchPlace = "";
-    public string SearchPlace { get => _searchPlace; set => Set(ref _searchPlace, value); }
+    private string _searchQuery = "";
+    public string SearchQuery { get => _searchQuery; set => Set(ref _searchQuery, value); }
 
     private string _searchStatus = "";
     public string SearchStatus { get => _searchStatus; set => Set(ref _searchStatus, value); }
 
-    public ObservableCollection<PersonSummary> Results { get; } = [];
+    public ObservableCollection<PersonSummary> SearchResults { get; } = [];
 
-    private PersonSummary? _selectedPerson;
-    public PersonSummary? SelectedPerson
+    private PersonSummary? _selectedResult;
+    public PersonSummary? SelectedResult
     {
-        get => _selectedPerson;
+        get => _selectedResult;
         set
         {
-            if (Set(ref _selectedPerson, value) && value is not null)
-                _ = LoadDetailAsync(value.Handle);
+            if (Set(ref _selectedResult, value) && value is not null)
+                _ = LoadCenterAsync(value.Handle);
         }
     }
 
     public ICommand SearchCommand { get; }
 
+    /// <summary>"Hans 1750" -> q tokens + birth window around the year.</summary>
     private async Task SearchAsync()
     {
         if (_client is null)
             return;
         try
         {
+            var words = new List<string>();
+            int? year = null;
+            foreach (var token in SearchQuery.Split(' ',
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (token.Length == 4 && int.TryParse(token, out var parsed))
+                    year = parsed;
+                else
+                    words.Add(token);
+            }
             var response = await _client.SearchPersonsAsync(
-                q: NullIfEmpty(SearchQ),
-                surname: NullIfEmpty(SearchSurname),
-                given: NullIfEmpty(SearchGiven),
-                birthYearFrom: ParseIntOrNull(SearchBirthFrom),
-                birthYearTo: ParseIntOrNull(SearchBirthTo),
-                place: NullIfEmpty(SearchPlace));
-            Results.Clear();
+                q: words.Count > 0 ? string.Join(' ', words) : null,
+                birthYearFrom: year - 10, birthYearTo: year + 10);
+            SearchResults.Clear();
             foreach (var person in response.Results)
-                Results.Add(person);
-            SearchStatus = $"{response.Total} match(es), showing {response.Results.Count}";
+                SearchResults.Add(person);
+            SearchStatus = $"{response.Total} Treffer";
+            if (response.Results.Count == 1)
+                SelectedResult = response.Results[0];
         }
         catch (Exception ex)
         {
@@ -153,47 +137,198 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    // ---- person detail ----------------------------------------------
+    // ---- walkable tree ----------------------------------------------
 
-    private string _detailHeader = "(no person selected)";
-    public string DetailHeader { get => _detailHeader; set => Set(ref _detailHeader, value); }
+    private PersonBoxVM? _center;
+    public PersonBoxVM? Center { get => _center; set => Set(ref _center, value); }
 
-    public ObservableCollection<PersonEvent> Events { get; } = [];
+    private PersonBoxVM? _spouse;
+    public PersonBoxVM? Spouse { get => _spouse; set => Set(ref _spouse, value); }
 
-    private PersonEvent? _selectedEvent;
-    public PersonEvent? SelectedEvent { get => _selectedEvent; set => Set(ref _selectedEvent, value); }
+    // fixed positions: man left, woman right — selecting the bride only
+    // moves the blue frame, never swaps boxes
+    private PersonBoxVM? _leftBox;
+    public PersonBoxVM? LeftBox { get => _leftBox; set => Set(ref _leftBox, value); }
 
+    private PersonBoxVM? _rightBox;
+    public PersonBoxVM? RightBox { get => _rightBox; set => Set(ref _rightBox, value); }
+
+    public ObservableCollection<PersonBoxVM> LeftParentsRow { get; } = [];
+    public ObservableCollection<PersonBoxVM> RightParentsRow { get; } = [];
+
+    private List<PersonBrief> _centerParents = [];
+    private string _centerGender = "U";
+    public ObservableCollection<PersonBoxVM> ChildrenRow { get; } = [];
+    public ObservableCollection<FactRowVM> Facts { get; } = [];
     public ObservableCollection<FamilyInfo> Families { get; } = [];
 
-    private FamilyInfo? _selectedFamily;
-    public FamilyInfo? SelectedFamily { get => _selectedFamily; set => Set(ref _selectedFamily, value); }
+    public bool HasMultipleFamilies => Families.Count > 1;
 
-    private async Task LoadDetailAsync(string handle)
+    private FamilyInfo? _selectedFamily;
+    public FamilyInfo? SelectedFamily
+    {
+        get => _selectedFamily;
+        set
+        {
+            if (Set(ref _selectedFamily, value) && !_suppressFamilyReload)
+                _ = UpdateFamilyDependentAsync();
+        }
+    }
+
+    public ICommand NavigateCommand { get; }
+    public ICommand TogglePersonCommand { get; }
+    public ICommand ToggleFactCommand { get; }
+
+    private async Task LoadCenterAsync(string handle)
     {
         if (_client is null)
             return;
         try
         {
             var detail = await _client.GetPersonAsync(handle);
-            DetailHeader = $"{detail.PrimaryName}  [{detail.GrampsId}]  "
-                           + $"({detail.Gender}, {detail.CitationCount} person citations)";
-            Events.Clear();
-            foreach (var evt in detail.Events)
-                Events.Add(evt);
-            SelectedEvent = null;
+            _centerDetail = detail;
+
+            if (Center?.Handle != handle)
+                Center = new PersonBoxVM(handle) { IsCenter = true, IsLarge = true };
+            Center.UpdateFrom(new PersonBrief(handle, detail.GrampsId,
+                detail.PrimaryName, detail.Gender, detail.Birth, detail.Death));
+
+            _centerParents = detail.Parents;
+            _centerGender = detail.Gender;
+            SyncFacts(detail.Events);
+
+            _suppressFamilyReload = true;
+            var keepHandle = SelectedFamily?.Handle;
             Families.Clear();
             foreach (var family in detail.Families)
                 Families.Add(family);
-            SelectedFamily = Families.FirstOrDefault();
-            Log("person detail", detail);
+            SelectedFamily = Families.FirstOrDefault(f => f.Handle == keepHandle)
+                             ?? Families.FirstOrDefault();
+            _suppressFamilyReload = false;
+            OnChanged(nameof(HasMultipleFamilies));
+            await UpdateFamilyDependentAsync();
+
+            RecomputeBadges();
         }
         catch (Exception ex)
         {
-            DetailHeader = "detail failed: " + ex.Message;
+            SearchStatus = "load failed: " + ex.Message;
         }
     }
 
-    // ---- capture form ------------------------------------------------
+    private async Task UpdateFamilyDependentAsync()
+    {
+        var spouseBrief = SelectedFamily?.Spouse;
+        var spouseGender = "U";
+        var spouseParents = new List<PersonBrief>();
+        if (spouseBrief is null)
+        {
+            if (Spouse is null || !Spouse.IsPlaceholder)
+                Spouse = PersonBoxVM.Placeholder(large: true);
+        }
+        else
+        {
+            if (Spouse?.Handle != spouseBrief.Handle)
+                Spouse = new PersonBoxVM(spouseBrief.Handle) { IsLarge = true };
+            Spouse.UpdateFrom(spouseBrief);
+            spouseGender = spouseBrief.Gender ?? "U";
+            try
+            {
+                // spouse's parents live one detail call away
+                var spouseDetail = await _client!.GetPersonAsync(spouseBrief.Handle);
+                Spouse.UpdateFrom(new PersonBrief(spouseBrief.Handle,
+                    spouseDetail.GrampsId, spouseDetail.PrimaryName,
+                    spouseDetail.Gender, spouseDetail.Birth, spouseDetail.Death));
+                spouseGender = spouseDetail.Gender;
+                spouseParents = spouseDetail.Parents;
+            }
+            catch (Exception)
+            {
+                // brief data is good enough for the box
+            }
+        }
+
+        // man left, woman right; the selected person is only marked blue
+        var centerLeft = _centerGender switch
+        {
+            "M" => true,
+            "F" => false,
+            _ => spouseGender != "M",
+        };
+        LeftBox = centerLeft ? Center : Spouse;
+        RightBox = centerLeft ? Spouse : Center;
+        SyncRow(LeftParentsRow,
+                PadCouple(centerLeft ? _centerParents : spouseParents));
+        SyncRow(RightParentsRow,
+                PadCouple(centerLeft ? spouseParents : _centerParents));
+
+        // children plus one trailing "Neu" slot, like the concept sketch
+        var children = (SelectedFamily?.Children ?? [])
+            .Cast<PersonBrief?>().Append(null).ToList();
+        SyncRow(ChildrenRow, children);
+        RecomputeBadges();
+    }
+
+    /// <summary>Always two slots per parent couple; missing -> "Neu".</summary>
+    private static List<PersonBrief?> PadCouple(IReadOnlyList<PersonBrief> briefs) =>
+        [briefs.ElementAtOrDefault(0), briefs.ElementAtOrDefault(1)];
+
+    /// <summary>In-place row sync (spec 7.3: identical sets keep their
+    /// boxes, so a post-upload refresh never moves the view). A null
+    /// brief means a "Neu" placeholder slot.</summary>
+    private static void SyncRow(ObservableCollection<PersonBoxVM> row,
+                                IReadOnlyList<PersonBrief?> briefs)
+    {
+        var same = row.Count == briefs.Count && row.Zip(briefs).All(pair =>
+            pair.Second is null ? pair.First.IsPlaceholder
+                                : pair.First.Handle == pair.Second.Handle);
+        if (same)
+        {
+            foreach (var (box, brief) in row.Zip(briefs))
+                if (brief is not null)
+                    box.UpdateFrom(brief);
+            return;
+        }
+        row.Clear();
+        foreach (var brief in briefs)
+        {
+            if (brief is null)
+            {
+                row.Add(PersonBoxVM.Placeholder());
+                continue;
+            }
+            var box = new PersonBoxVM(brief.Handle);
+            box.UpdateFrom(brief);
+            row.Add(box);
+        }
+    }
+
+    private void SyncFacts(IReadOnlyList<PersonEvent> events)
+    {
+        if (Facts.Count == events.Count
+            && Facts.Zip(events).All(pair => pair.First.Handle == pair.Second.Handle))
+        {
+            foreach (var (row, evt) in Facts.Zip(events))
+                row.UpdateFrom(evt);
+            return;
+        }
+        Facts.Clear();
+        foreach (var evt in events)
+        {
+            var row = new FactRowVM(evt.Handle);
+            row.UpdateFrom(evt);
+            Facts.Add(row);
+        }
+    }
+
+    private IEnumerable<PersonBoxVM> AllBoxes()
+    {
+        IEnumerable<PersonBoxVM?> boxes =
+            [Center, Spouse, .. LeftParentsRow, .. RightParentsRow, .. ChildrenRow];
+        return boxes.Where(b => b is { IsPlaceholder: false })!;
+    }
+
+    // ---- find form (stands in for scraped data) ----------------------
 
     private string _repoName = "Matricula Online";
     public string RepoName { get => _repoName; set => Set(ref _repoName, value); }
@@ -212,9 +347,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Mirrors the real app: the MH_SourceKey is derived from the
-    /// book data, so key and title cannot drift apart. Uncheck to type a
-    /// key manually (e.g. to test the mismatch warning).</summary>
+    private string _sourceAuthor = "Kath. Pfarramt Testpfarrei";
+    public string SourceAuthor { get => _sourceAuthor; set => Set(ref _sourceAuthor, value); }
+
+    private string _sourceKey = "";
+    public string SourceKey
+    {
+        get => _sourceKey;
+        set
+        {
+            if (Set(ref _sourceKey, value) && DerivePermalink)
+                Permalink = ComputePermalink();
+        }
+    }
+
     private bool _deriveKey = true;
     public bool DeriveKey
     {
@@ -231,23 +377,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public bool KeyIsManual => !DeriveKey;
-
-    private string _sourceAuthor = "Kath. Pfarramt Testpfarrei";
-    public string SourceAuthor { get => _sourceAuthor; set => Set(ref _sourceAuthor, value); }
-
-    private string _sourcePublication = "";
-    public string SourcePublication { get => _sourcePublication; set => Set(ref _sourcePublication, value); }
-
-    private string _sourceKey = "";
-    public string SourceKey
-    {
-        get => _sourceKey;
-        set
-        {
-            if (Set(ref _sourceKey, value) && DerivePermalink)
-                Permalink = ComputePermalink();
-        }
-    }
 
     private string _callNumber = "T 1/1";
     public string CallNumber { get => _callNumber; set => Set(ref _callNumber, value); }
@@ -275,9 +404,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string _permalink = "";
     public string Permalink { get => _permalink; set => Set(ref _permalink, value); }
 
-    /// <summary>Mirrors reality: every scan page has its own permalink.
-    /// Derived from book key + page so distinct records never collide in
-    /// the person-URL dedup. Uncheck to type a URL manually.</summary>
     private bool _derivePermalink = true;
     public bool DerivePermalink
     {
@@ -298,235 +424,253 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string ComputePermalink() =>
         $"https://data.matricula-online.eu/de/{SourceKey}/{DeriveSourceKey(CitationPage)}";
 
+    private string _noteText = "Transkription: ...";
+    public string NoteText { get => _noteText; set => Set(ref _noteText, value); }
+
     private bool _copyLinkToPersons = true;
     public bool CopyLinkToPersons { get => _copyLinkToPersons; set => Set(ref _copyLinkToPersons, value); }
 
-    private string _noteText = "Transkription: Joannes, ehel. Sohn des ...";
-    public string NoteText { get => _noteText; set => Set(ref _noteText, value); }
-
-    private bool _attachToSelectedEvent;
-    public bool AttachToSelectedEvent { get => _attachToSelectedEvent; set => Set(ref _attachToSelectedEvent, value); }
+    // ---- new-event draft --------------------------------------------
 
     public string[] EventTypes { get; } =
-        ["Baptism", "Christening", "Birth", "Marriage", "Death", "Burial"];
+        ["Baptism", "Christening", "Birth", "Marriage", "Death", "Burial",
+         "Occupation", "Residence"];
 
-    /// <summary>Event types that live on the Family object in Gramps.</summary>
     private static readonly HashSet<string> s_familyEventTypes =
         ["Marriage", "Marriage Banns", "Engagement", "Divorce"];
+
+    private bool _draftNewEvent;
+    public bool DraftNewEvent { get => _draftNewEvent; set => Set(ref _draftNewEvent, value); }
 
     private string _eventType = "Baptism";
     public string EventType { get => _eventType; set => Set(ref _eventType, value); }
 
-    private string _eventDescription = "Taufe laut Matrikel";
+    private string _eventDescription = "";
     public string EventDescription { get => _eventDescription; set => Set(ref _eventDescription, value); }
 
-    private string _captureStatus = "";
-    public string CaptureStatus { get => _captureStatus; set => Set(ref _captureStatus, value); }
+    // ---- staging queue ----------------------------------------------
 
-    public ICommand CaptureCommand { get; }
-    public ICommand RepeatCaptureCommand { get; }
+    public ObservableCollection<AssignmentVM> Queue { get; } = [];
 
-    private CaptureRequest? BuildRequest()
+    private string _queueStatus = "";
+    public string QueueStatus { get => _queueStatus; set => Set(ref _queueStatus, value); }
+
+    public ICommand QueueCommand { get; }
+    public ICommand SendCommand { get; }
+
+    private void QueueAssignment()
     {
-        if (AttachToSelectedEvent && SelectedEvent is null)
+        var targets = new List<TargetRefVM>();
+        foreach (var fact in Facts.Where(f => f.IsDraftTarget))
+            targets.Add(new TargetRefVM
+            { Kind = "event", Handle = fact.Handle, Label = fact.Label });
+        foreach (var box in AllBoxes().Where(b => b.IsDraftTarget))
+            targets.Add(new TargetRefVM
+            { Kind = "person", Handle = box.Handle, Label = box.Name });
+
+        NewEventVM? newEvent = null;
+        if (DraftNewEvent)
         {
-            CaptureStatus = "no event selected to attach to";
-            return null;
-        }
-        if (!AttachToSelectedEvent && SelectedPerson is null)
-        {
-            CaptureStatus = "no person selected for the new event";
-            return null;
+            if (s_familyEventTypes.Contains(EventType))
+            {
+                if (SelectedFamily is null)
+                {
+                    QueueStatus = $"{EventType} ist ein Familienereignis — "
+                                  + "keine Familie vorhanden";
+                    return;
+                }
+                newEvent = new NewEventVM
+                {
+                    EventType = EventType,
+                    OwnerKind = "family",
+                    OwnerHandle = SelectedFamily.Handle,
+                    OwnerLabel = "Familie " + (SelectedFamily.Spouse?.PrimaryName
+                                               ?? Center?.Name ?? ""),
+                    Description = NullIfEmpty(EventDescription),
+                };
+            }
+            else
+            {
+                if (Center is null)
+                    return;
+                newEvent = new NewEventVM
+                {
+                    EventType = EventType,
+                    OwnerKind = "person",
+                    OwnerHandle = Center.Handle,
+                    OwnerLabel = Center.Name,
+                    Description = NullIfEmpty(EventDescription),
+                };
+            }
         }
 
-        var date = ParseDate(CitationDate);
+        if (targets.Count == 0 && newEvent is null)
+        {
+            QueueStatus = "keine Ziele markiert (📎 an Ereignis oder Person)";
+            return;
+        }
+
+        Queue.Add(new AssignmentVM
+        {
+            RepoName = RepoName, RepoUrl = RepoUrl,
+            SourceTitle = SourceTitle, SourceAuthor = SourceAuthor,
+            SourceKey = SourceKey, CallNumber = CallNumber,
+            Page = CitationPage, DateText = CitationDate,
+            Confidence = Confidence, Permalink = Permalink,
+            NoteText = NoteText, CopyLinkToPersons = CopyLinkToPersons,
+            Targets = targets, NewEvent = newEvent,
+        });
+
+        foreach (var fact in Facts)
+            fact.IsDraftTarget = false;
+        foreach (var box in AllBoxes())
+            box.IsDraftTarget = false;
+        DraftNewEvent = false;
+        RecomputeBadges();
+        QueueStatus = $"{Queue.Count(a => a.Status == AssignmentStatus.Pending)} "
+                      + "Zuordnung(en) ausstehend";
+    }
+
+    private CaptureRequest BuildRequest(AssignmentVM assignment)
+    {
+        var date = ParseDate(assignment.DateText);
         var request = new CaptureRequest
         {
             RequestId = Guid.NewGuid().ToString(),
             Repository = new RepositoryBlock
             {
-                Match = new MatchSpec { By = "name", Value = RepoName },
+                Match = new MatchSpec { By = "name", Value = assignment.RepoName },
                 CreateIfMissing = new RepositoryCreate
                 {
-                    Name = RepoName,
+                    Name = assignment.RepoName,
                     Type = "Website",
-                    Url = NullIfEmpty(RepoUrl),
+                    Url = NullIfEmpty(assignment.RepoUrl),
                 },
             },
             Source = new SourceBlock
             {
                 Match = new MatchSpec
                 {
-                    By = "attribute",
-                    Key = "MH_SourceKey",
-                    Value = SourceKey,
+                    By = "attribute", Key = "MH_SourceKey",
+                    Value = assignment.SourceKey,
                 },
                 CreateIfMissing = new SourceCreate
                 {
-                    Title = SourceTitle,
-                    Author = NullIfEmpty(SourceAuthor),
-                    PublicationInfo = NullIfEmpty(SourcePublication),
-                    Attributes = [new AttributeKV("MH_SourceKey", SourceKey)],
+                    Title = assignment.SourceTitle,
+                    Author = NullIfEmpty(assignment.SourceAuthor),
+                    Attributes = [new AttributeKV("MH_SourceKey", assignment.SourceKey)],
                     RepositoryRef = new RepoRefSpec
                     {
-                        CallNumber = NullIfEmpty(CallNumber),
+                        CallNumber = NullIfEmpty(assignment.CallNumber),
                         MediaType = "Book",
                     },
                 },
             },
             Citation = new CitationBlock
             {
-                Page = NullIfEmpty(CitationPage),
+                Page = NullIfEmpty(assignment.Page),
                 Date = date,
-                Confidence = Confidence,
-                Attributes = string.IsNullOrWhiteSpace(Permalink)
+                Confidence = assignment.Confidence,
+                Attributes = string.IsNullOrWhiteSpace(assignment.Permalink)
                     ? null
-                    : [new AttributeKV("MH_Permalink", Permalink)],
-                Notes = string.IsNullOrWhiteSpace(NoteText)
+                    : [new AttributeKV("MH_Permalink", assignment.Permalink)],
+                Notes = string.IsNullOrWhiteSpace(assignment.NoteText)
                     ? null
-                    : [new NoteSpec { Type = "Citation", Text = NoteText }],
+                    : [new NoteSpec { Type = "Citation", Text = assignment.NoteText }],
             },
         };
-
-        if (CopyLinkToPersons && !string.IsNullOrWhiteSpace(Permalink))
+        if (assignment.Targets.Count > 0)
+            request.Targets = assignment.Targets
+                .Select(t => new TargetRef { Type = t.Kind, Handle = t.Handle })
+                .ToList();
+        if (assignment.NewEvent is { } newEvent)
         {
-            var eventLabel = AttachToSelectedEvent
-                ? $"{SelectedEvent!.Type} {SelectedEvent.DateText}".Trim()
-                : $"{EventType} {CitationDate}".Trim();
+            request.CreateEventIfMissing = new CreateEventBlock
+            {
+                PersonHandle = newEvent.OwnerKind == "person" ? newEvent.OwnerHandle : null,
+                FamilyHandle = newEvent.OwnerKind == "family" ? newEvent.OwnerHandle : null,
+                EventType = newEvent.EventType,
+                Date = date,
+                Description = newEvent.Description,
+            };
+        }
+        if (assignment.CopyLinkToPersons
+            && !string.IsNullOrWhiteSpace(assignment.Permalink))
+        {
             request.PersonUrl = new PersonUrlSpec
             {
-                Path = Permalink.Trim(),
-                Description = eventLabel,
+                Path = assignment.Permalink.Trim(),
+                Description = assignment.NewEvent?.Label
+                    ?? assignment.Targets.FirstOrDefault(t => t.Kind == "event")?.Label
+                    ?? "Beleg " + assignment.Page,
                 Type = "Digitalisat",
-            };
-        }
-
-        if (AttachToSelectedEvent)
-        {
-            request.Targets =
-                [new TargetRef { Type = "event", Handle = SelectedEvent!.Handle }];
-        }
-        else if (s_familyEventTypes.Contains(EventType))
-        {
-            // family events (Marriage etc.) belong on the Family object
-            if (SelectedFamily is null)
-            {
-                CaptureStatus = $"{EventType} is a family event — the selected "
-                                + "person has no family to attach it to";
-                return null;
-            }
-            request.CreateEventIfMissing = new CreateEventBlock
-            {
-                FamilyHandle = SelectedFamily.Handle,
-                EventType = EventType,
-                Date = date,
-                Description = NullIfEmpty(EventDescription),
-            };
-        }
-        else
-        {
-            request.CreateEventIfMissing = new CreateEventBlock
-            {
-                PersonHandle = SelectedPerson!.Handle,
-                EventType = EventType,
-                Role = "Primary",
-                Date = date,
-                Description = NullIfEmpty(EventDescription),
             };
         }
         return request;
     }
 
-    private async Task CaptureAsync()
-    {
-        var request = BuildRequest();
-        if (request is null)
-            return;
-        if (!await ConfirmSourceReuseAsync())
-        {
-            CaptureStatus = "cancelled";
-            return;
-        }
-        await SendCaptureAsync(request);
-    }
-
-    /// <summary>
-    /// Pre-flight (spec 7.2): if a source with this MH_SourceKey already
-    /// exists, the capture will attach to IT and ignore the entered
-    /// title. Warn when the titles disagree — that usually means the key
-    /// was not updated after switching to a different book.
-    /// </summary>
-    private async Task<bool> ConfirmSourceReuseAsync()
-    {
-        if (_client is null || string.IsNullOrWhiteSpace(SourceKey))
-            return true;
-        try
-        {
-            var existing = await _client.SearchSourcesAsync(
-                attributeKey: "MH_SourceKey", attributeValue: SourceKey);
-            var hit = existing.Results.FirstOrDefault();
-            if (hit is null || string.Equals(hit.Title?.Trim(), SourceTitle.Trim(),
-                                             StringComparison.Ordinal))
-                return true;
-            var answer = System.Windows.MessageBox.Show(
-                $"A source with key \"{SourceKey}\" already exists:\n\n"
-                + $"    {hit.Title}  [{hit.GrampsId}]\n\n"
-                + "The citation will be attached to that source; the title "
-                + $"entered here (\"{SourceTitle}\") is ignored.\n\n"
-                + "Different book? Press No and change the MH_SourceKey.\n\n"
-                + "Attach to the existing source anyway?",
-                "Source key already in use",
-                System.Windows.MessageBoxButton.YesNo,
-                System.Windows.MessageBoxImage.Warning);
-            return answer == System.Windows.MessageBoxResult.Yes;
-        }
-        catch (Exception)
-        {
-            return true;    // pre-flight is advisory; the capture itself decides
-        }
-    }
-
-    private async Task RepeatCaptureAsync()
-    {
-        if (_lastRequest is not null)
-            await SendCaptureAsync(_lastRequest);   // same request_id -> idempotent
-    }
-
-    private async Task SendCaptureAsync(CaptureRequest request)
+    private async Task SendAllAsync()
     {
         if (_client is null)
             return;
-        try
+        var pending = Queue.Where(a => a.Status == AssignmentStatus.Pending).ToList();
+        var succeeded = 0;
+        foreach (var assignment in pending)
         {
-            CaptureStatus = "sending…";
-            Log("capture request", request);
-            var response = await _client.CaptureAsync(request);
-            _lastRequest = request;
-            Log("capture response", response);
-            var source = response.Created.Source;
-            var citation = response.Created.Citation;
-            var sourceLabel = source?.Title is { } title
-                ? $"\"{title}\" [{source.GrampsId}]"
-                : source?.GrampsId;
-            CaptureStatus =
-                $"OK — citation {citation?.GrampsId} on source {sourceLabel}"
-                + (source?.WasExisting == true ? " (reused)" : " (new)")
-                + $", attached to {response.AttachedTo.Count} object(s)";
-            if (response.Created.PersonUrls is { Count: > 0 } personUrls)
+            try
             {
-                CaptureStatus += " — links: " + string.Join(", ",
-                    personUrls.Select(u => (u.Name ?? u.GrampsId)
-                        + (u.WasExisting ? " (already had it)" : " (new)")));
+                var request = BuildRequest(assignment);
+                Log("capture request", request);
+                var response = await _client.CaptureAsync(request);
+                Log("capture response", response);
+                assignment.CitationId = response.Created.Citation?.GrampsId;
+                assignment.CreatedEventHandle = response.Created.Event?.Handle;
+                assignment.Status = AssignmentStatus.Uploaded;
+                succeeded++;
+            }
+            catch (BridgeException ex)
+            {
+                assignment.Error = $"{ex.Code}: {ex.Message}";
+                assignment.Status = AssignmentStatus.Failed;
+            }
+            catch (Exception ex)
+            {
+                assignment.Error = ex.Message;
+                assignment.Status = AssignmentStatus.Failed;
             }
         }
-        catch (BridgeException ex)
+
+        // spec 7.3: read back the displayed slice, without moving the view
+        if (Center is not null)
+            await LoadCenterAsync(Center.Handle);
+        RecomputeBadges();
+
+        var failed = pending.Count - succeeded;
+        QueueStatus = $"{succeeded} hochgeladen"
+                      + (failed > 0 ? $", {failed} fehlgeschlagen" : "")
+                      + " — Anzeige aus Gramps aktualisiert";
+    }
+
+    private void RecomputeBadges()
+    {
+        foreach (var fact in Facts)
         {
-            CaptureStatus = $"bridge error {ex.Status} {ex.Code}: {ex.Message}";
-            Log("capture error", new { ex.Status, ex.Code, ex.Message });
+            fact.PendingCount = Queue.Count(a =>
+                a.Status == AssignmentStatus.Pending
+                && a.Targets.Any(t => t.Kind == "event" && t.Handle == fact.Handle));
+            fact.UploadedCount = Queue.Count(a =>
+                a.Status == AssignmentStatus.Uploaded
+                && (a.Targets.Any(t => t.Kind == "event" && t.Handle == fact.Handle)
+                    || a.CreatedEventHandle == fact.Handle));
         }
-        catch (Exception ex)
+        foreach (var box in AllBoxes())
         {
-            CaptureStatus = "capture failed: " + ex.Message;
+            box.PendingCount = Queue.Count(a =>
+                a.Status == AssignmentStatus.Pending
+                && a.Targets.Any(t => t.Kind == "person" && t.Handle == box.Handle));
+            box.UploadedCount = Queue.Count(a =>
+                a.Status == AssignmentStatus.Uploaded
+                && a.Targets.Any(t => t.Kind == "person" && t.Handle == box.Handle));
         }
     }
 
@@ -543,9 +687,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     // ---- helpers -----------------------------------------------------
 
-    /// <summary>Slug in the spirit of the real app's CleanForKey:
-    /// umlauts transliterated, accents stripped, non-alphanumeric runs
-    /// collapsed to '-', lowercase.</summary>
     private static string DeriveSourceKey(string title)
     {
         var text = title.ToLowerInvariant()
@@ -577,10 +718,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private static string? NullIfEmpty(string value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static int? ParseIntOrNull(string value) =>
-        int.TryParse(value, out var parsed) ? parsed : null;
-
-    /// <summary>Accepts yyyy-MM-dd, yyyy-MM, or yyyy; empty -> null.</summary>
     private static DateSpec? ParseDate(string value)
     {
         var parts = value.Trim().Split('-');

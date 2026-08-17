@@ -42,7 +42,7 @@ from mhbridge_persons import (DEFAULT_LIMIT, MAX_LIMIT, PersonIndex,
 from mhbridge_sources import search_repositories, search_sources
 
 API_VERSION = 1
-ADDON_VERSION = "0.7.2"
+ADDON_VERSION = "0.8.0"
 API_PREFIX = "/api/v1"
 DEFAULT_PORT = 8791
 PORT_SEARCH_RANGE = 20          # FA-2: try DEFAULT_PORT .. +19
