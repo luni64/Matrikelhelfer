@@ -67,6 +67,15 @@ public sealed class BridgeClient(GrampsEndpoint endpoint)
                                               CancellationToken ct = default) =>
         PostAsync<CaptureResponse>("/capture", request, ct);
 
+    /// <summary>Attach an existing citation to further objects (5.8) —
+    /// "this church record also evidences that fact".</summary>
+    public Task<AttachResponse> AttachCitationAsync(
+        string citationHandle, AttachRequest request,
+        CancellationToken ct = default) =>
+        PostAsync<AttachResponse>(
+            "/citations/" + Uri.EscapeDataString(citationHandle) + "/attach",
+            request, ct);
+
     // ---- plumbing ----------------------------------------------------
 
     private async Task<T> GetAsync<T>(string path, CancellationToken ct)

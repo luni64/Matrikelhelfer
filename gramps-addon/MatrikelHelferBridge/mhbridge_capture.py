@@ -458,3 +458,48 @@ def do_capture(db, payload):
     }
     LOG.info("capture: %s (%d new objects)", label, counters["created"])
     return response, counters["created"]
+
+
+# -- POST /citations/{handle}/attach (5.8) ----------------------------
+
+def do_attach(db, citation_handle, payload):
+    """Attach an EXISTING citation to further objects, own transaction.
+
+    The Gramps-Modus link view uses this when the user checks more
+    events for a citation already in Gramps ("this church record also
+    evidences that fact"). A target already carrying the citation is
+    reported was_existing instead of being attached twice.
+    """
+    citation = db.get_citation_from_handle(citation_handle)  # 404 on miss
+    targets = payload.get("targets") or []
+    if not targets:
+        raise InvalidPayload("'targets' must be a non-empty list")
+    for target in targets:
+        if not isinstance(target, dict) or not target.get("handle"):
+            raise InvalidPayload("each target needs 'type' and 'handle'")
+
+    label = ("MatrikelHelfer: Zitat %s anhängen"
+             % (citation.get_page() or citation.get_gramps_id()))[:100]
+    attached_to = []
+    with DbTxn(label, db) as trans:
+        for target in targets:
+            target_type = target.get("type")
+            obj = _get_target(db, target_type, target["handle"])
+            was_existing = citation_handle in obj.get_citation_list()
+            if not was_existing:
+                obj.add_citation(citation_handle)
+                _commit_target(db, target_type, obj, trans)
+            attached_to.append({"type": target_type,
+                                "handle": obj.get_handle(),
+                                "gramps_id": obj.get_gramps_id(),
+                                "was_existing": was_existing})
+
+    response = {
+        "request_id": payload.get("request_id"),
+        "citation": {"handle": citation_handle,
+                     "gramps_id": citation.get_gramps_id()},
+        "attached_to": attached_to,
+        "transaction_label": label,
+    }
+    LOG.info("attach: %s (%d target(s))", label, len(attached_to))
+    return response

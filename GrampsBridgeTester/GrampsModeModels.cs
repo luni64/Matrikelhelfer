@@ -129,8 +129,10 @@ public sealed class PersonBoxVM(string handle) : ObservableObject
     }
 }
 
-/// <summary>One row in the facts/events list: a real Gramps event, or a
-/// pending one produced by a create-event change entry.</summary>
+/// <summary>One row in the facts/events list: a real Gramps event or a
+/// pending one produced by a create-event change entry. Deliberately no
+/// person-object row: a church record always evidences a fact, never
+/// the person itself (decision 2026-08-18, see spec 7.3).</summary>
 public sealed class FactRowVM(string handle) : ObservableObject
 {
     public string Handle { get; } = handle;   // event handle | change-entry id
@@ -148,6 +150,27 @@ public sealed class FactRowVM(string handle) : ObservableObject
 
     private bool _isPendingNew;
     public bool IsPendingNew { get => _isPendingNew; set => Set(ref _isPendingNew, value); }
+
+    /// <summary>Citations already on this row in Gramps — the link view
+    /// draws its solid lines and locked checkboxes from these.</summary>
+    public List<CitationRef> Citations { get; private set; } = [];
+
+    // -- link-view state (set by MainViewModel.RefreshLinkView) -------
+
+    private bool _isSelected;
+    public bool IsSelected { get => _isSelected; set => Set(ref _isSelected, value); }
+
+    private bool _isAssignSubject;
+    public bool IsAssignSubject { get => _isAssignSubject; set => Set(ref _isAssignSubject, value); }
+
+    private bool _showCheckBox;
+    public bool ShowCheckBox { get => _showCheckBox; set => Set(ref _showCheckBox, value); }
+
+    private bool _isChecked;
+    public bool IsChecked { get => _isChecked; set => Set(ref _isChecked, value); }
+
+    private bool _isCheckEnabled = true;
+    public bool IsCheckEnabled { get => _isCheckEnabled; set => Set(ref _isCheckEnabled, value); }
 
     private int _pendingCount;
     public int PendingCount
@@ -168,19 +191,63 @@ public sealed class FactRowVM(string handle) : ObservableObject
         Scope = evt.Scope ?? "person";
         FamilyHandle = evt.FamilyHandle;
         CitationCount = evt.CitationCount;
+        Citations = evt.Citations ?? [];
         IsPendingNew = false;
     }
 
     public void UpdateFromPending(ChangeEntry entry)
     {
         Label = $"(neu) {entry.EventType}"
-            + (entry.Find.DateText is { Length: > 0 } date ? " " + date : "")
+            + (entry.Find!.DateText is { Length: > 0 } date ? " " + date : "")
             + (entry.OwnerKind == "family" ? "  [Familie]" : "");
         Scope = entry.OwnerKind == "family" ? "family" : "person";
         FamilyHandle = entry.OwnerKind == "family" ? entry.OwnerHandle : null;
         CitationCount = 0;
+        Citations = [];
         IsPendingNew = true;
     }
+}
+
+/// <summary>One card in the sources column: an existing citation of the
+/// displayed person (keyed by citation handle) or the current find
+/// (key "find"). Target sets are fact-row keys; recomputed by
+/// MainViewModel.RefreshLinkView.</summary>
+public sealed class SourceCardVM(string key) : ObservableObject
+{
+    public string Key { get; } = key;          // citation handle | "find"
+    public bool IsFind => Key == "find";
+
+    private string _title = "";
+    public string Title { get => _title; set => Set(ref _title, value); }
+
+    private string _page = "";
+    public string Page { get => _page; set => Set(ref _page, value); }
+
+    private string _toolTipText = "";
+    public string ToolTipText { get => _toolTipText; set => Set(ref _toolTipText, value); }
+
+    /// <summary>Fact rows already carrying this citation in Gramps
+    /// (always empty for the find card). Locked in assign mode — the
+    /// bridge deliberately cannot detach citations (spec 2.2).</summary>
+    public HashSet<string> ExistingTargets { get; } = [];
+
+    /// <summary>Fact rows targeted by change-list entries.</summary>
+    public HashSet<string> PendingTargets { get; } = [];
+
+    private bool _isSelected;
+    public bool IsSelected { get => _isSelected; set => Set(ref _isSelected, value); }
+
+    private bool _isAssignSubject;
+    public bool IsAssignSubject { get => _isAssignSubject; set => Set(ref _isAssignSubject, value); }
+
+    private bool _showCheckBox;
+    public bool ShowCheckBox { get => _showCheckBox; set => Set(ref _showCheckBox, value); }
+
+    private bool _isChecked;
+    public bool IsChecked { get => _isChecked; set => Set(ref _isChecked, value); }
+
+    private bool _isCheckEnabled = true;
+    public bool IsCheckEnabled { get => _isCheckEnabled; set => Set(ref _isCheckEnabled, value); }
 }
 
 /// <summary>Frozen copy of the find fields at the moment of a change.
@@ -192,6 +259,7 @@ public sealed class FindSnapshot
     public required string RepoUrl { get; init; }
     public required string SourceTitle { get; init; }
     public required string SourceAuthor { get; init; }
+    public required string Abbrev { get; init; }
     public required string SourceKey { get; init; }
     public required string CallNumber { get; init; }
     public required string Page { get; init; }
@@ -205,7 +273,7 @@ public sealed class FindSnapshot
         string.Join("|", SourceKey, Page, DateText, Permalink, NoteText, Confidence);
 }
 
-public enum ChangeKind { AttachCitation, CreateEvent }
+public enum ChangeKind { AttachCitation, CreateEvent, AttachExisting }
 
 /// <summary>One entry of the change list ("Änderungsliste"): a recorded
 /// user action, executed at upload. DependsOnId links an entry to the
@@ -216,15 +284,19 @@ public sealed class ChangeEntry : ObservableObject
 {
     public string Id { get; } = Guid.NewGuid().ToString("N");
     public required ChangeKind Kind { get; init; }
-    public required FindSnapshot Find { get; init; }
+    public FindSnapshot? Find { get; init; }             // null for AttachExisting
     public required string EntityKey { get; init; }      // person/family handle
     public required string EntityLabel { get; init; }
     public string? DependsOnId { get; init; }
 
-    // AttachCitation
+    // AttachCitation / AttachExisting
     public string? TargetKind { get; init; }             // person | event | pending-event
     public string? TargetHandle { get; init; }           // handle | change-entry id
     public string? TargetLabel { get; init; }
+
+    // AttachExisting: which existing Gramps citation to attach
+    public string? CitationHandle { get; init; }
+    public string? SourceLabel { get; init; }
 
     // CreateEvent
     public string? EventType { get; init; }
@@ -241,9 +313,14 @@ public sealed class ChangeEntry : ObservableObject
 
     public bool HasError => Error is not null;
 
-    public string DisplayText => Kind == ChangeKind.CreateEvent
-        ? $"Neues Ereignis: {EventType} — mit Zitat {Find.Page}"
-        : $"Zitat {Find.Page} → {TargetLabel}";
+    public string DisplayText => Kind switch
+    {
+        ChangeKind.CreateEvent =>
+            $"Neues Ereignis: {EventType} — mit Zitat {Find!.Page}",
+        ChangeKind.AttachExisting =>
+            $"Vorhandenes Zitat „{SourceLabel}“ → {TargetLabel}",
+        _ => $"Zitat {Find!.Page} → {TargetLabel}",
+    };
 }
 
 public sealed class ChangeNodeVM(ChangeEntry entry)

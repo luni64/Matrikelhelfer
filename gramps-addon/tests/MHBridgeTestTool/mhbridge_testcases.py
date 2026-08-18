@@ -531,3 +531,65 @@ class BridgeApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(family_links), 2)
         self.assertTrue(all(link["url"].endswith("/de/x")
                             for link in family_links))
+
+    # -- POST /citations/{handle}/attach (5.8) -----------------------
+
+    def test_140_attach_existing_citation(self):
+        # target: Hans' seeded baptism, which has no citations yet
+        status, body = get("/persons/" + CTX["handles"]["hans"])
+        self.assertEqual(status, 200)
+        baptism = [e for e in body["events"] if e["type"] == "Baptism"][0]
+        self.assertEqual(baptism["citation_count"], 0)
+        CTX["hans_baptism"] = baptism["handle"]
+
+        status, body = post("/citations/%s/attach" % CTX["citation_080"],
+                            {"targets": [{"type": "event",
+                                          "handle": baptism["handle"]}]})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["citation"]["handle"], CTX["citation_080"])
+        self.assertFalse(body["attached_to"][0]["was_existing"])
+        citations = in_main(lambda: db().get_event_from_handle(
+            CTX["hans_baptism"]).get_citation_list())
+        self.assertIn(CTX["citation_080"], citations)
+
+    def test_141_attach_repeat_reports_existing(self):
+        status, body = post("/citations/%s/attach" % CTX["citation_080"],
+                            {"targets": [{"type": "event",
+                                          "handle": CTX["hans_baptism"]}]})
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["attached_to"][0]["was_existing"])
+        count = in_main(lambda: db().get_event_from_handle(
+            CTX["hans_baptism"]).get_citation_list()
+            .count(CTX["citation_080"]))
+        self.assertEqual(count, 1)  # never attached twice
+
+    def test_142_attach_unknown_citation(self):
+        status, body = post("/citations/nosuchhandle/attach",
+                            {"targets": [{"type": "event",
+                                          "handle": CTX["hans_baptism"]}]})
+        self.assertEqual(status, 404)
+        self.assertEqual(body["error"]["code"], "NOT_FOUND")
+
+    def test_143_attach_requires_targets(self):
+        status, body = post("/citations/%s/attach" % CTX["citation_080"], {})
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "INVALID_REQUEST")
+
+    # -- citations block in person detail (Gramps-Modus link view) ----
+
+    def test_150_detail_citations_carry_source(self):
+        status, body = get("/persons/" + CTX["handles"]["hans"])
+        self.assertEqual(status, 200)
+        baptism = [e for e in body["events"]
+                   if e["handle"] == CTX["hans_baptism"]][0]
+        self.assertEqual(baptism["citation_count"], 1)
+        self.assertEqual(len(baptism["citations"]), 1)
+        ref = baptism["citations"][0]
+        self.assertEqual(ref["handle"], CTX["citation_080"])
+        self.assertEqual(ref["page"], "S. 42, Eintrag 7")
+        self.assertEqual(ref["source_title"],
+                         "Testpfarrei, Taufbuch Bd. 1 (1770-1790)")
+        self.assertTrue(ref["source_handle"])
+        self.assertIn("source_abbrev", ref)   # None here - not captured
+        # the person-level citation list is delivered the same way
+        self.assertEqual(body["citations"], [])

@@ -200,6 +200,39 @@ class PersonIndex:
                 } | {"parents": parents}
 
 
+def _citation_rows(db, citation_handles, source_cache):
+    """Citation refs incl. source title/abbreviation - the client's
+    event<->source link view (Gramps-Modus) draws its connector lines
+    and source cards from this. source_cache: handle -> (title, abbrev),
+    shared per detail call so a book referenced by many events is
+    fetched once."""
+    rows = []
+    for citation_handle in citation_handles:
+        try:
+            citation = db.get_citation_from_handle(citation_handle)
+        except HandleError:
+            continue
+        source_handle = citation.get_reference_handle()
+        if source_handle not in source_cache:
+            try:
+                source = db.get_source_from_handle(source_handle)
+                source_cache[source_handle] = (
+                    source.get_title() or None,
+                    source.get_abbreviation() or None)
+            except HandleError:
+                source_cache[source_handle] = (None, None)
+        title, abbrev = source_cache[source_handle]
+        rows.append({
+            "handle": citation_handle,
+            "source_handle": source_handle,
+            "source_title": title,
+            "source_abbrev": abbrev,
+            "page": citation.get_page() or None,
+            "date_text": get_date(citation) or None,
+        })
+    return rows
+
+
 def person_detail(db, handle):
     """Full view for the client's detail display (5.5).
 
@@ -207,6 +240,7 @@ def person_detail(db, handle):
     by the HTTP layer (FA-C5: client re-validates before writing).
     """
     person = db.get_person_from_handle(handle)
+    source_cache = {}
 
     names = []
     for position, name in enumerate([person.get_primary_name()]
@@ -238,6 +272,8 @@ def person_detail(db, handle):
             "place": place_displayer.display_event(db, event) or None,
             "description": event.get_description() or None,
             "citation_count": len(event.get_citation_list()),
+            "citations": _citation_rows(db, event.get_citation_list(),
+                                        source_cache),
         }
 
     events = []
@@ -300,6 +336,8 @@ def person_detail(db, handle):
         "birth": _event_summary(db, get_birth_or_fallback(db, person)),
         "death": _event_summary(db, get_death_or_fallback(db, person)),
         "citation_count": len(person.get_citation_list()),
+        "citations": _citation_rows(db, person.get_citation_list(),
+                                    source_cache),
         "names": names,
         "events": events,
         "parents": parents,

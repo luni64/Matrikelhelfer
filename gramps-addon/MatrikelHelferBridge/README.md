@@ -3,9 +3,13 @@
 Gramps addon that exposes a local HTTP/JSON API so MatrikelHelfer can read the
 open family tree and (from stage 6 on) write sources/citations into it.
 Specification: `docs/MatrikelHelfer-Gramps-Bridge-Anforderungen.md` in the
-main repo. Current state: **stages 1–6** (skeleton, gramplet UI, server +
-marshalling, `/ping`, discovery file, token, security checks, person search
-and detail, source/repository search, `POST /capture` with idempotency).
+main repo. Current state: **stages 1–6 plus first stage-7 single op**
+(skeleton, gramplet UI, server + marshalling, `/ping`, discovery file, token,
+security checks, person search and detail — events carry their citations
+incl. source title/abbreviation for the client's link view —,
+source/repository search, `POST /capture` with idempotency, and
+`POST /citations/{handle}/attach` to attach an existing citation to further
+objects).
 
 ## Files
 
@@ -21,10 +25,11 @@ and detail, source/repository search, `POST /capture` with idempotency).
 powershell -ExecutionPolicy Bypass -File gramps-addon\tests\run_tests.ps1
 ```
 
-Runs 26 integration tests headless inside the real Gramps runtime
+Runs 40 integration tests headless inside the real Gramps runtime
 (`grampsd.exe` CLI + a test tool plugin): auth/origin/content-type checks,
-person search and detail, source/repository lookup, full capture,
-source reuse, idempotent replay, rollback on bad target, undo. Uses the
+person search and detail (incl. the per-event citations block),
+source/repository lookup, full capture, source reuse, idempotent replay,
+rollback on bad target, undo, attach-existing-citation. Uses the
 dedicated **MHBridgeTest** tree (wiped and reseeded every run — the tool
 refuses any other tree), a separate port (8811) and a temp discovery file,
 so a running production bridge is unaffected. Gramps GUI must be closed

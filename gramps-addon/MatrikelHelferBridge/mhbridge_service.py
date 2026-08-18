@@ -36,13 +36,13 @@ from gi.repository import GLib
 from gramps.gen.const import USER_DATA, VERSION as GRAMPS_VERSION
 from gramps.gen.errors import HandleError
 
-from mhbridge_capture import InvalidPayload, do_capture
+from mhbridge_capture import InvalidPayload, do_attach, do_capture
 from mhbridge_persons import (DEFAULT_LIMIT, MAX_LIMIT, PersonIndex,
                               person_detail)
 from mhbridge_sources import search_repositories, search_sources
 
 API_VERSION = 1
-ADDON_VERSION = "0.8.0"
+ADDON_VERSION = "0.9.0"
 API_PREFIX = "/api/v1"
 DEFAULT_PORT = 8791
 PORT_SEARCH_RANGE = 20          # FA-2: try DEFAULT_PORT .. +19
@@ -217,6 +217,17 @@ class BridgeService:
         db = self._open_db()
         response, created_count = do_capture(db, payload)
         self.objects_created += created_count
+        if request_id:
+            self._idempotency[request_id] = response
+        return response
+
+    def attach_citation(self, citation_handle, payload):
+        request_id = payload.get("request_id")
+        if request_id and request_id in self._idempotency:
+            LOG.info("attach: request_id %s replayed from cache", request_id)
+            return self._idempotency[request_id]
+        db = self._open_db()
+        response = do_attach(db, citation_handle, payload)
         if request_id:
             self._idempotency[request_id] = response
         return response
@@ -458,18 +469,19 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 return
 
             if self.command == "POST" and path == API_PREFIX + "/capture":
-                try:
-                    payload = json.loads(self._body or b"{}")
-                except (ValueError, UnicodeDecodeError):
-                    self._respond_error(400, "INVALID_REQUEST",
-                                        "Body is not valid JSON.")
-                    return
-                if not isinstance(payload, dict):
-                    self._respond_error(400, "INVALID_REQUEST",
-                                        "Body must be a JSON object.")
-                    return
+                payload = self._json_body()
                 self._respond(200, run_in_main(
                     lambda: service.capture(payload)))
+                return
+
+            citations_prefix = API_PREFIX + "/citations/"
+            if (self.command == "POST" and path.startswith(citations_prefix)
+                    and path.endswith("/attach")):
+                handle = urllib.parse.unquote(
+                    path[len(citations_prefix):-len("/attach")])
+                payload = self._json_body()
+                self._respond(200, run_in_main(
+                    lambda: service.attach_citation(handle, payload)))
                 return
 
             self._respond_error(404, "NOT_FOUND", "Unknown endpoint: " + path)
@@ -484,6 +496,18 @@ class BridgeHandler(BaseHTTPRequestHandler):
             LOG.exception("unexpected error while handling %s", self.path)
             self._respond_error(500, "INTERNAL_ERROR",
                                 "Unexpected error, details in the Gramps log.")
+
+    def _json_body(self):
+        """Parse the drained POST body; raises BridgeError on bad JSON."""
+        try:
+            payload = json.loads(self._body or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            raise BridgeError(400, "INVALID_REQUEST",
+                              "Body is not valid JSON.")
+        if not isinstance(payload, dict):
+            raise BridgeError(400, "INVALID_REQUEST",
+                              "Body must be a JSON object.")
+        return payload
 
     def _person_search_args(self, params):
         """Validate 5.4 query parameters."""

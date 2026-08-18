@@ -1,84 +1,89 @@
 using System.Windows;
-using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Shapes;
+using System.Windows.Threading;
 
 namespace GrampsBridgeTester;
 
+/// <summary>
+/// Pure view logic: draws the Ancestry-style connector lines between
+/// fact rows and source cards. Which pairs to draw is the ViewModel's
+/// business (GetLinkPairs); geometry, colors and redraw scheduling are
+/// the view's.
+/// </summary>
 public partial class MainWindow : Window
 {
-    private const string FindDataFormat = "MatrikelHelferFind";
+    private static readonly Brush s_existingStroke =
+        new SolidColorBrush(Color.FromRgb(0x8C, 0x8C, 0x8C));
+    private static readonly Brush s_pendingStroke =
+        new SolidColorBrush(Color.FromRgb(0x14, 0x40, 0xC8));
 
-    private Point _dragStart;
+    private bool _redrawQueued;
 
     public MainWindow()
     {
         InitializeComponent();
+        Loaded += (_, _) =>
+        {
+            if (DataContext is MainViewModel vm)
+                vm.LinksChanged += ScheduleRedraw;
+        };
+        // size changes move rows/cards without a LinksChanged event
+        LinkArea.SizeChanged += (_, _) => ScheduleRedraw();
     }
 
-    // ---- drag source: the citation card ----------------------------
-
-    private void CitationCard_PreviewMouseLeftButtonDown(object sender,
-                                                         MouseButtonEventArgs e)
+    /// <summary>Coalesces redraw requests and defers them until after
+    /// layout, so freshly generated item containers have positions.</summary>
+    private void ScheduleRedraw()
     {
-        _dragStart = e.GetPosition(null);
-    }
-
-    private void CitationCard_PreviewMouseMove(object sender, MouseEventArgs e)
-    {
-        if (e.LeftButton != MouseButtonState.Pressed)
+        if (_redrawQueued)
             return;
-        var position = e.GetPosition(null);
-        if (Math.Abs(position.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance
-            && Math.Abs(position.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+        _redrawQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            _redrawQueued = false;
+            RedrawLinks();
+        });
+    }
+
+    private void RedrawLinks()
+    {
+        LinkCanvas.Children.Clear();
+        if (DataContext is not MainViewModel vm)
             return;
-        DragDrop.DoDragDrop((DependencyObject)sender,
-                            new DataObject(FindDataFormat, "current-find"),
-                            DragDropEffects.Link);
-    }
+        foreach (var (fact, card, pending) in vm.GetLinkPairs())
+        {
+            if (FactsList.ItemContainerGenerator.ContainerFromItem(fact)
+                    is not FrameworkElement factElement
+                || CardsList.ItemContainerGenerator.ContainerFromItem(card)
+                    is not FrameworkElement cardElement)
+                continue;
 
-    // ---- drop target: person boxes (template event handlers) --------
+            var start = factElement.TranslatePoint(
+                new Point(factElement.ActualWidth, factElement.ActualHeight / 2),
+                LinkCanvas);
+            var end = cardElement.TranslatePoint(
+                new Point(0, cardElement.ActualHeight / 2), LinkCanvas);
 
-    private static PersonBoxVM? DropTargetBox(object sender) =>
-        (sender as FrameworkElement)?.DataContext
-            is PersonBoxVM { IsPlaceholder: false } box ? box : null;
+            // horizontal S-curve through the gutter
+            var reach = Math.Max(30, (end.X - start.X) / 2);
+            var geometry = new StreamGeometry();
+            using (var context = geometry.Open())
+            {
+                context.BeginFigure(start, isFilled: false, isClosed: false);
+                context.BezierTo(new Point(start.X + reach, start.Y),
+                                 new Point(end.X - reach, end.Y),
+                                 end, isStroked: true, isSmoothJoin: false);
+            }
+            geometry.Freeze();
 
-    private void PersonBox_DragOver(object sender, DragEventArgs e)
-    {
-        e.Effects = e.Data.GetDataPresent(FindDataFormat)
-                    && DropTargetBox(sender) is not null
-            ? DragDropEffects.Link
-            : DragDropEffects.None;
-        e.Handled = true;
-    }
-
-    private void PersonBox_Drop(object sender, DragEventArgs e)
-    {
-        if (!e.Data.GetDataPresent(FindDataFormat))
-            return;
-        if (DropTargetBox(sender) is { } box && DataContext is MainViewModel vm)
-            vm.DropFindOnPerson(box);
-        e.Handled = true;
-    }
-
-    // ---- drop target: fact/event rows -------------------------------
-
-    private static FactRowVM? DropTargetFact(object sender) =>
-        (sender as FrameworkElement)?.DataContext as FactRowVM;
-
-    private void FactRow_DragOver(object sender, DragEventArgs e)
-    {
-        e.Effects = e.Data.GetDataPresent(FindDataFormat)
-                    && DropTargetFact(sender) is not null
-            ? DragDropEffects.Link
-            : DragDropEffects.None;
-        e.Handled = true;
-    }
-
-    private void FactRow_Drop(object sender, DragEventArgs e)
-    {
-        if (!e.Data.GetDataPresent(FindDataFormat))
-            return;
-        if (DropTargetFact(sender) is { } fact && DataContext is MainViewModel vm)
-            vm.DropFindOnFact(fact);
-        e.Handled = true;
+            LinkCanvas.Children.Add(new Path
+            {
+                Data = geometry,
+                Stroke = pending ? s_pendingStroke : s_existingStroke,
+                StrokeThickness = pending ? 1.8 : 1.5,
+                StrokeDashArray = pending ? [4, 3] : null,
+            });
+        }
     }
 }

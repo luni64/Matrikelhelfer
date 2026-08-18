@@ -7,10 +7,12 @@ namespace GrampsBridgeTester;
 
 /// <summary>
 /// Prototype of the "Gramps-Modus" view (spec 7.3): search, walkable
-/// mini-tree, and a change list ("Änderungsliste") — every user action
-/// (drop a citation, add an event) is recorded as a deletable entry;
-/// upload executes the list with dependency ordering and shared-citation
-/// coalescing, then reads the displayed slice back in place.
+/// mini-tree, an Ancestry-style event↔source link view (click draws
+/// connector lines, double-click enters assign mode) and a change list
+/// ("Änderungsliste") — every user action (assign a citation, add an
+/// event) is recorded as a deletable entry; upload executes the list
+/// with dependency ordering and shared-citation coalescing, then reads
+/// the displayed slice back in place.
 /// </summary>
 public sealed class MainViewModel : ObservableObject
 {
@@ -31,10 +33,15 @@ public sealed class MainViewModel : ObservableObject
         NavigateCommand = new RelayCommand<PersonBoxVM>(
             async void (box) => await LoadCenterAsync(box.Handle),
             box => !box.IsPlaceholder);
-        ToggleFactCommand = new RelayCommand<FactRowVM>(DropFindOnFact);
+        SelectFactCommand = new RelayCommand<FactRowVM>(FactClicked);
+        SelectCardCommand = new RelayCommand<SourceCardVM>(CardClicked);
+        AssignFactCommand = new RelayCommand<FactRowVM>(FactDoubleClicked);
+        AssignCardCommand = new RelayCommand<SourceCardVM>(CardDoubleClicked);
+        EndAssignCommand = new RelayCommand(EndAssign);
         DeleteEntryCommand = new RelayCommand<ChangeEntry>(DeleteEntry);
         DeleteGroupCommand = new RelayCommand<ChangeGroupVM>(DeleteGroup);
         SourceKey = DeriveSourceKey(SourceTitle);
+        Abbrev = DeriveAbbrevText(SourceTitle);
         Permalink = ComputePermalink();
     }
 
@@ -173,7 +180,6 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public ICommand NavigateCommand { get; }
-    public ICommand ToggleFactCommand { get; }
 
     private async Task LoadCenterAsync(string handle)
     {
@@ -205,6 +211,7 @@ public sealed class MainViewModel : ObservableObject
             await UpdateFamilyDependentAsync();
 
             RecomputeBadges();
+            RefreshLinkView();
         }
         catch (Exception ex)
         {
@@ -264,6 +271,7 @@ public sealed class MainViewModel : ObservableObject
         SyncRow(ChildrenRow, children);
         SyncFacts();
         RecomputeBadges();
+        RefreshLinkView();
     }
 
     /// <summary>Always two slots per parent couple; missing -> "Neu".</summary>
@@ -342,6 +350,348 @@ public sealed class MainViewModel : ObservableObject
         return boxes.Where(b => b is { IsPlaceholder: false })!;
     }
 
+    // ---- event <-> source link view (Ancestry-style) -----------------
+    //
+    // Selection anchors are stored as KEYS, not object references: the
+    // in-place syncs may rebuild rows/cards, and a key survives that.
+
+    public ObservableCollection<SourceCardVM> SourceCards { get; } = [];
+
+    private string? _selectedFactKey;
+    private string? _selectedCardKey;
+    private string? _assignFactKey;    // assign mode anchored at a fact
+    private string? _assignCardKey;    // assign mode anchored at a card
+
+    public bool InAssignMode => _assignFactKey is not null || _assignCardKey is not null;
+
+    public string AssignHint =>
+        _assignCardKey is not null
+            ? "Zuordnen: Ereignisse anklicken, die dieses Zitat belegen soll"
+            : _assignFactKey is not null
+                ? "Zuordnen: Quellen anklicken, die dieses Ereignis belegen"
+                : "";
+
+    /// <summary>The view redraws its connector lines on this.</summary>
+    public event Action? LinksChanged;
+
+    public ICommand SelectFactCommand { get; }
+    public ICommand SelectCardCommand { get; }
+    public ICommand AssignFactCommand { get; }
+    public ICommand AssignCardCommand { get; }
+    public ICommand EndAssignCommand { get; }
+
+    private FactRowVM? FactByKey(string? key) =>
+        key is null ? null : Facts.FirstOrDefault(f => f.Handle == key);
+
+    private SourceCardVM? CardByKey(string? key) =>
+        key is null ? null : SourceCards.FirstOrDefault(c => c.Key == key);
+
+    /// <summary>Single click: in assign mode a fact click toggles the
+    /// link to the assign card; otherwise it selects (draws lines).</summary>
+    private void FactClicked(FactRowVM fact)
+    {
+        if (_assignFactKey is not null)
+            return;                                  // facts are the subject
+        if (CardByKey(_assignCardKey) is { } subject)
+        {
+            ToggleLink(fact, subject);
+            return;
+        }
+        _selectedFactKey = fact.Handle;
+        _selectedCardKey = null;
+        RefreshLinkView();
+    }
+
+    private void CardClicked(SourceCardVM card)
+    {
+        if (_assignCardKey is not null)
+            return;                                  // cards are the subject
+        if (FactByKey(_assignFactKey) is { } subject)
+        {
+            ToggleLink(subject, card);
+            return;
+        }
+        _selectedCardKey = card.Key;
+        _selectedFactKey = null;
+        RefreshLinkView();
+    }
+
+    /// <summary>Double click enters assign mode with this row as the
+    /// subject; double-clicking the subject again leaves it.</summary>
+    private void FactDoubleClicked(FactRowVM fact)
+    {
+        if (_assignFactKey == fact.Handle)
+        {
+            EndAssign();
+            return;
+        }
+        if (InAssignMode)
+            return;
+        _assignFactKey = fact.Handle;
+        _selectedFactKey = fact.Handle;
+        _selectedCardKey = null;
+        RefreshLinkView();
+    }
+
+    private void CardDoubleClicked(SourceCardVM card)
+    {
+        if (_assignCardKey == card.Key)
+        {
+            EndAssign();
+            return;
+        }
+        if (InAssignMode)
+            return;
+        _assignCardKey = card.Key;
+        _selectedCardKey = card.Key;
+        _selectedFactKey = null;
+        RefreshLinkView();
+    }
+
+    private void EndAssign()
+    {
+        _assignFactKey = null;
+        _assignCardKey = null;
+        RefreshLinkView();
+    }
+
+    /// <summary>One toggle for every (fact, card) pair, whichever side
+    /// anchors the assign mode. Links already existing in Gramps are
+    /// locked — the bridge deliberately cannot detach citations.</summary>
+    private void ToggleLink(FactRowVM fact, SourceCardVM card)
+    {
+        if (card.ExistingTargets.Contains(fact.Handle))
+        {
+            QueueStatus = "bereits in Gramps verknüpft — Lösen ist über "
+                          + "die Bridge bewusst nicht möglich";
+            return;
+        }
+        var pending = card.IsFind
+            ? Changes.FirstOrDefault(c =>
+                c.Kind == ChangeKind.AttachCitation
+                && c.Find!.GroupKey == SnapshotFind().GroupKey
+                && c.TargetHandle == fact.Handle)
+            : Changes.FirstOrDefault(c =>
+                c.Kind == ChangeKind.AttachExisting
+                && c.CitationHandle == card.Key
+                && c.TargetHandle == fact.Handle);
+        if (pending is not null)
+        {
+            Changes.Remove(pending);
+            AfterChangesMutation("Zuordnung entfernt");
+            return;
+        }
+
+        // no person-object targets: a church record always evidences a
+        // fact, never the person itself (spec 7.3, 2026-08-18)
+        var targetKind = fact.IsPendingNew ? "pending-event" : "event";
+        var (entityKey, entityLabel) = FactEntity(fact);
+        if (card.IsFind)
+        {
+            var find = SnapshotFind();
+            Changes.Add(new ChangeEntry
+            {
+                Kind = ChangeKind.AttachCitation,
+                Find = find,
+                EntityKey = entityKey,
+                EntityLabel = entityLabel,
+                DependsOnId = fact.IsPendingNew ? fact.Handle : null,
+                TargetKind = targetKind,
+                TargetHandle = fact.Handle,
+                TargetLabel = fact.Label,
+            });
+            AfterChangesMutation(
+                $"Änderung erfasst: Zitat {find.Page} → {fact.Label}");
+        }
+        else
+        {
+            Changes.Add(new ChangeEntry
+            {
+                Kind = ChangeKind.AttachExisting,
+                CitationHandle = card.Key,
+                SourceLabel = card.Title,
+                EntityKey = entityKey,
+                EntityLabel = entityLabel,
+                DependsOnId = fact.IsPendingNew ? fact.Handle : null,
+                TargetKind = targetKind,
+                TargetHandle = fact.Handle,
+                TargetLabel = fact.Label,
+            });
+            AfterChangesMutation(
+                $"Änderung erfasst: vorhandenes Zitat → {fact.Label}");
+        }
+    }
+
+    /// <summary>Rebuilds cards + link sets and re-applies all selection,
+    /// assign and checkbox visuals. Single entry point after any change
+    /// to facts, cards, changes or selection.</summary>
+    private void RefreshLinkView()
+    {
+        SyncSourceCards();
+
+        var groupKey = SnapshotFind().GroupKey;
+        foreach (var card in SourceCards)
+        {
+            card.ExistingTargets.Clear();
+            card.PendingTargets.Clear();
+            if (card.IsFind)
+            {
+                foreach (var entry in Changes)
+                    if (entry.Kind == ChangeKind.AttachCitation
+                        && entry.Find!.GroupKey == groupKey
+                        && entry.TargetHandle is { } target)
+                        card.PendingTargets.Add(target);
+            }
+            else
+            {
+                foreach (var fact in Facts)
+                    if (fact.Citations.Any(r => r.Handle == card.Key))
+                        card.ExistingTargets.Add(fact.Handle);
+                foreach (var entry in Changes)
+                    if (entry.Kind == ChangeKind.AttachExisting
+                        && entry.CitationHandle == card.Key
+                        && entry.TargetHandle is { } target)
+                        card.PendingTargets.Add(target);
+            }
+        }
+
+        // anchors whose row/card vanished (navigation, deletion)
+        if (_assignCardKey is not null && CardByKey(_assignCardKey) is null)
+            _assignCardKey = null;
+        if (_assignFactKey is not null && FactByKey(_assignFactKey) is null)
+            _assignFactKey = null;
+        if (_selectedCardKey is not null && CardByKey(_selectedCardKey) is null)
+            _selectedCardKey = null;
+        if (_selectedFactKey is not null && FactByKey(_selectedFactKey) is null)
+            _selectedFactKey = null;
+
+        var assignCard = CardByKey(_assignCardKey);
+        foreach (var fact in Facts)
+        {
+            fact.IsSelected = fact.Handle == _selectedFactKey;
+            fact.IsAssignSubject = fact.Handle == _assignFactKey;
+            fact.ShowCheckBox = assignCard is not null;
+            if (assignCard is not null)
+            {
+                var existing = assignCard.ExistingTargets.Contains(fact.Handle);
+                fact.IsChecked = existing
+                    || assignCard.PendingTargets.Contains(fact.Handle);
+                fact.IsCheckEnabled = !existing;
+            }
+        }
+        var assignFactKey = _assignFactKey;
+        foreach (var card in SourceCards)
+        {
+            card.IsSelected = card.Key == _selectedCardKey;
+            card.IsAssignSubject = card.Key == _assignCardKey;
+            card.ShowCheckBox = assignFactKey is not null;
+            if (assignFactKey is not null)
+            {
+                var existing = card.ExistingTargets.Contains(assignFactKey);
+                card.IsChecked = existing
+                    || card.PendingTargets.Contains(assignFactKey);
+                card.IsCheckEnabled = !existing;
+            }
+        }
+
+        OnChanged(nameof(InAssignMode));
+        OnChanged(nameof(AssignHint));
+        LinksChanged?.Invoke();
+    }
+
+    /// <summary>Card list = find card + one card per distinct citation,
+    /// in first appearance order over the fact rows. In-place sync so
+    /// selection and post-upload refreshes keep their cards.</summary>
+    private void SyncSourceCards()
+    {
+        var desired = new List<(string Key, Action<SourceCardVM> Update)>
+        {
+            ("find", UpdateFindCard),
+        };
+        var seen = new HashSet<string>();
+        foreach (var fact in Facts)
+            foreach (var reference in fact.Citations)
+                if (seen.Add(reference.Handle))
+                {
+                    var captured = reference;
+                    desired.Add((reference.Handle,
+                                 card => UpdateCitationCard(card, captured)));
+                }
+
+        var same = SourceCards.Count == desired.Count && SourceCards
+            .Zip(desired).All(pair => pair.First.Key == pair.Second.Key);
+        if (same)
+        {
+            foreach (var (card, want) in SourceCards.Zip(desired))
+                want.Update(card);
+            return;
+        }
+        SourceCards.Clear();
+        foreach (var (key, update) in desired)
+        {
+            var card = new SourceCardVM(key);
+            update(card);
+            SourceCards.Add(card);
+        }
+    }
+
+    private void UpdateFindCard(SourceCardVM card)
+    {
+        card.Title = string.IsNullOrWhiteSpace(Abbrev) ? SourceTitle : Abbrev;
+        card.Page = CitationPage;
+        card.ToolTipText = string.Join("\n", new[]
+        {
+            SourceTitle,
+            SourceAuthor,
+            CallNumber is { Length: > 0 } ? "Signatur: " + CallNumber : "",
+            CitationPage,
+            CitationDate,
+        }.Where(line => line.Length > 0));
+    }
+
+    private static void UpdateCitationCard(SourceCardVM card, CitationRef reference)
+    {
+        card.Title = reference.SourceLabel;
+        card.Page = reference.Page ?? "";
+        card.ToolTipText = string.Join("\n", new[]
+        {
+            reference.SourceTitle ?? "",
+            reference.Page is { Length: > 0 } ? "Seite: " + reference.Page : "",
+            reference.DateText is { Length: > 0 } ? "Datum: " + reference.DateText : "",
+        }.Where(line => line.Length > 0));
+    }
+
+    /// <summary>The line pairs the view draws: everything linked to the
+    /// current anchor (assign subject wins over plain selection).</summary>
+    public IReadOnlyList<(FactRowVM Fact, SourceCardVM Card, bool Pending)> GetLinkPairs()
+    {
+        var pairs = new List<(FactRowVM, SourceCardVM, bool)>();
+        var card = CardByKey(_assignCardKey ?? _selectedCardKey);
+        if (card is not null)
+        {
+            foreach (var fact in Facts)
+            {
+                if (card.ExistingTargets.Contains(fact.Handle))
+                    pairs.Add((fact, card, false));
+                else if (card.PendingTargets.Contains(fact.Handle))
+                    pairs.Add((fact, card, true));
+            }
+            return pairs;
+        }
+        var anchor = FactByKey(_assignFactKey ?? _selectedFactKey);
+        if (anchor is not null)
+        {
+            foreach (var sourceCard in SourceCards)
+            {
+                if (sourceCard.ExistingTargets.Contains(anchor.Handle))
+                    pairs.Add((anchor, sourceCard, false));
+                else if (sourceCard.PendingTargets.Contains(anchor.Handle))
+                    pairs.Add((anchor, sourceCard, true));
+            }
+        }
+        return pairs;
+    }
+
     // ---- find form (stands in for scraped data) ----------------------
 
     private string _repoName = "Matricula Online";
@@ -356,13 +706,44 @@ public sealed class MainViewModel : ObservableObject
         get => _sourceTitle;
         set
         {
-            if (Set(ref _sourceTitle, value) && DeriveKey)
+            if (!Set(ref _sourceTitle, value))
+                return;
+            if (DeriveKey)
                 SourceKey = DeriveSourceKey(value);
+            if (DeriveAbbrev)
+                Abbrev = DeriveAbbrevText(value);
+            RefreshLinkView();   // the find card shows the title
         }
     }
 
     private string _sourceAuthor = "Kath. Pfarramt Testpfarrei";
     public string SourceAuthor { get => _sourceAuthor; set => Set(ref _sourceAuthor, value); }
+
+    // fixed derivation for now (real client: "Pfarrei, Buchtyp Von–Bis");
+    // a user-configurable format can come later
+    private string _abbrev = "";
+    public string Abbrev
+    {
+        get => _abbrev;
+        set { if (Set(ref _abbrev, value)) RefreshLinkView(); }
+    }
+
+    private bool _deriveAbbrev = true;
+    public bool DeriveAbbrev
+    {
+        get => _deriveAbbrev;
+        set
+        {
+            if (Set(ref _deriveAbbrev, value))
+            {
+                OnChanged(nameof(AbbrevIsManual));
+                if (value)
+                    Abbrev = DeriveAbbrevText(SourceTitle);
+            }
+        }
+    }
+
+    public bool AbbrevIsManual => !DeriveAbbrev;
 
     private string _sourceKey = "";
     public string SourceKey
@@ -401,8 +782,11 @@ public sealed class MainViewModel : ObservableObject
         get => _citationPage;
         set
         {
-            if (Set(ref _citationPage, value) && DerivePermalink)
+            if (!Set(ref _citationPage, value))
+                return;
+            if (DerivePermalink)
                 Permalink = ComputePermalink();
+            RefreshLinkView();   // the find card shows the page
         }
     }
 
@@ -448,7 +832,7 @@ public sealed class MainViewModel : ObservableObject
     {
         RepoName = RepoName, RepoUrl = RepoUrl,
         SourceTitle = SourceTitle, SourceAuthor = SourceAuthor,
-        SourceKey = SourceKey, CallNumber = CallNumber,
+        Abbrev = Abbrev, SourceKey = SourceKey, CallNumber = CallNumber,
         Page = CitationPage, DateText = CitationDate,
         Confidence = Confidence, Permalink = Permalink,
         NoteText = NoteText, CopyLinkToPersons = CopyLinkToPersons,
@@ -482,47 +866,6 @@ public sealed class MainViewModel : ObservableObject
     public ICommand SendCommand { get; }
     public ICommand DeleteEntryCommand { get; }
     public ICommand DeleteGroupCommand { get; }
-
-    /// <summary>Drop on a person box: record "citation → person".</summary>
-    public void DropFindOnPerson(PersonBoxVM box)
-    {
-        var find = SnapshotFind();
-        if (HasDuplicate(find, "person", box.Handle))
-            return;
-        Changes.Add(new ChangeEntry
-        {
-            Kind = ChangeKind.AttachCitation,
-            Find = find,
-            EntityKey = box.Handle,
-            EntityLabel = box.Name,
-            TargetKind = "person",
-            TargetHandle = box.Handle,
-            TargetLabel = box.Name,
-        });
-        AfterChangesMutation($"Änderung erfasst: Zitat {find.Page} → {box.Name}");
-    }
-
-    /// <summary>Drop on a fact row (real or pending event).</summary>
-    public void DropFindOnFact(FactRowVM fact)
-    {
-        var find = SnapshotFind();
-        var targetKind = fact.IsPendingNew ? "pending-event" : "event";
-        if (HasDuplicate(find, targetKind, fact.Handle))
-            return;
-        var (entityKey, entityLabel) = FactEntity(fact);
-        Changes.Add(new ChangeEntry
-        {
-            Kind = ChangeKind.AttachCitation,
-            Find = find,
-            EntityKey = entityKey,
-            EntityLabel = entityLabel,
-            DependsOnId = fact.IsPendingNew ? fact.Handle : null,
-            TargetKind = targetKind,
-            TargetHandle = fact.Handle,
-            TargetLabel = fact.Label,
-        });
-        AfterChangesMutation($"Änderung erfasst: Zitat {find.Page} → {fact.Label}");
-    }
 
     /// <summary>"+ Ereignis vormerken": record a create-event change; a
     /// pending row appears in the facts list and is itself a drop target.</summary>
@@ -563,17 +906,6 @@ public sealed class MainViewModel : ObservableObject
             EventDescription = NullIfEmpty(EventDescription),
         });
         AfterChangesMutation($"Änderung erfasst: neues Ereignis {EventType}");
-    }
-
-    private bool HasDuplicate(FindSnapshot find, string targetKind, string handle)
-    {
-        var duplicate = Changes.Any(c =>
-            c.Kind == ChangeKind.AttachCitation
-            && c.Find.GroupKey == find.GroupKey
-            && c.TargetKind == targetKind && c.TargetHandle == handle);
-        if (duplicate)
-            QueueStatus = "bereits vorgemerkt (Eintrag in der Änderungsliste)";
-        return duplicate;
     }
 
     private (string Key, string Label) FactEntity(FactRowVM fact)
@@ -633,6 +965,7 @@ public sealed class MainViewModel : ObservableObject
         SyncFacts();
         RecomputeBadges();
         RebuildChangeTree();
+        RefreshLinkView();
         QueueStatus = $"{status} — {Changes.Count} Änderung(en) offen";
     }
 
@@ -663,13 +996,12 @@ public sealed class MainViewModel : ObservableObject
     {
         foreach (var fact in Facts)
             fact.PendingCount = Changes.Count(c =>
-                c.Kind == ChangeKind.AttachCitation && c.TargetHandle == fact.Handle);
+                c.Kind is ChangeKind.AttachCitation or ChangeKind.AttachExisting
+                && c.TargetHandle == fact.Handle);
         foreach (var box in AllBoxes())
             box.PendingCount = Changes.Count(c =>
-                (c.Kind == ChangeKind.AttachCitation
-                 && c.TargetKind == "person" && c.TargetHandle == box.Handle)
-                || (c.Kind == ChangeKind.CreateEvent
-                    && c.OwnerKind == "person" && c.OwnerHandle == box.Handle));
+                c.Kind == ChangeKind.CreateEvent
+                && c.OwnerKind == "person" && c.OwnerHandle == box.Handle);
     }
 
     // ---- upload ------------------------------------------------------
@@ -701,6 +1033,7 @@ public sealed class MainViewModel : ObservableObject
                 {
                     Title = find.SourceTitle,
                     Author = NullIfEmpty(find.SourceAuthor),
+                    Abbreviation = NullIfEmpty(find.Abbrev),
                     Attributes = [new AttributeKV("MH_SourceKey", find.SourceKey)],
                     RepositoryRef = new RepoRefSpec
                     {
@@ -795,7 +1128,7 @@ public sealed class MainViewModel : ObservableObject
         foreach (var create in creates)
         {
             var sameRecord = attaches.Where(a =>
-                a.Find.GroupKey == create.Find.GroupKey).ToList();
+                a.Find!.GroupKey == create.Find!.GroupKey).ToList();
             var realTargets = sameRecord.Where(a => a.TargetKind is "person" or "event")
                 .ToList();
             var redundant = sameRecord.Where(a =>
@@ -805,14 +1138,14 @@ public sealed class MainViewModel : ObservableObject
             covered.AddRange(redundant);   // create's own citation covers these
             foreach (var entry in realTargets.Concat(redundant))
                 attaches.Remove(entry);
-            await RunCapture(create.Find,
+            await RunCapture(create.Find!,
                 realTargets.Select(a => new TargetRef
                 { Type = a.TargetKind!, Handle = a.TargetHandle! }).ToList(),
                 create, covered);
         }
 
         // phase B: remaining citation drops, one capture per record
-        foreach (var group in attaches.GroupBy(a => a.Find.GroupKey))
+        foreach (var group in attaches.GroupBy(a => a.Find!.GroupKey))
         {
             var targets = new List<TargetRef>();
             var covered = new List<ChangeEntry>();
@@ -838,7 +1171,60 @@ public sealed class MainViewModel : ObservableObject
             if (blocked)
                 failed += group.Count() - covered.Count;
             if (covered.Count > 0)
-                await RunCapture(group.First().Find, targets, null, covered);
+                await RunCapture(group.First().Find!, targets, null, covered);
+        }
+
+        // phase C: attach EXISTING citations, one bridge call per
+        // citation with all its checked targets
+        var existingAttaches = Changes
+            .Where(c => c.Kind == ChangeKind.AttachExisting).ToList();
+        foreach (var group in existingAttaches.GroupBy(c => c.CitationHandle!))
+        {
+            var targets = new List<TargetRef>();
+            var covered = new List<ChangeEntry>();
+            foreach (var entry in group)
+            {
+                var handle = entry.TargetKind == "pending-event"
+                    ? createdEventHandles.GetValueOrDefault(entry.TargetHandle!)
+                    : entry.TargetHandle;
+                if (handle is null)
+                {
+                    entry.Error = "Voraussetzung (neues Ereignis) nicht ausgeführt";
+                    failed++;
+                    continue;
+                }
+                targets.Add(new TargetRef
+                {
+                    Type = entry.TargetKind == "pending-event"
+                        ? "event" : entry.TargetKind!,
+                    Handle = handle,
+                });
+                covered.Add(entry);
+            }
+            if (covered.Count == 0)
+                continue;
+            try
+            {
+                var request = new AttachRequest
+                {
+                    RequestId = Guid.NewGuid().ToString(),
+                    Targets = targets,
+                };
+                Log("attach request", request);
+                var response = await _client.AttachCitationAsync(group.Key, request);
+                Log("attach response", response);
+                foreach (var entry in covered)
+                    Changes.Remove(entry);
+                succeeded += covered.Count;
+            }
+            catch (Exception ex)
+            {
+                var message = ex is BridgeException bridgeEx
+                    ? $"{bridgeEx.Code}: {bridgeEx.Message}" : ex.Message;
+                foreach (var entry in covered)
+                    entry.Error = message;
+                failed += covered.Count;
+            }
         }
 
         // spec 7.3: read back the displayed slice, without moving the view
@@ -847,6 +1233,7 @@ public sealed class MainViewModel : ObservableObject
         SyncFacts();
         RecomputeBadges();
         RebuildChangeTree();
+        RefreshLinkView();
         QueueStatus = $"{succeeded} Änderung(en) ausgeführt"
                       + (failed > 0 ? $", {failed} fehlgeschlagen (in der Liste markiert)" : "")
                       + " — Anzeige aus Gramps aktualisiert";
@@ -891,6 +1278,18 @@ public sealed class MainViewModel : ObservableObject
             }
         }
         return builder.Length > 0 ? builder.ToString() : "empty";
+    }
+
+    /// <summary>Fixed abbreviation derivation (tester stand-in): title
+    /// minus parenthesized parts. The real client derives from the
+    /// scraped fields ("Pfarrei, Buchtyp Von–Bis").</summary>
+    private static string DeriveAbbrevText(string title)
+    {
+        var text = System.Text.RegularExpressions.Regex
+            .Replace(title, @"\s*\([^)]*\)", "");
+        text = System.Text.RegularExpressions.Regex
+            .Replace(text, @"\s+", " ").Trim();
+        return text.Length > 60 ? text[..60].TrimEnd() : text;
     }
 
     private static string? NullIfEmpty(string value) =>

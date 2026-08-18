@@ -44,12 +44,27 @@ public sealed record NameInfo(
     string Type, bool Primary, string? Given, string? CallName,
     string? Surname, string? Display);
 
+/// <summary>One citation on an event/person, incl. its source — feeds
+/// the Gramps-Modus link view (source cards + connector lines).</summary>
+public sealed record CitationRef(
+    string Handle, string SourceHandle, string? SourceTitle,
+    string? SourceAbbrev, string? Page, string? DateText)
+{
+    /// <summary>Compact card label: abbreviation when maintained,
+    /// else the full title (hand-made Gramps sources often have none).</summary>
+    [JsonIgnore]
+    public string SourceLabel =>
+        !string.IsNullOrWhiteSpace(SourceAbbrev) ? SourceAbbrev
+        : SourceTitle ?? "(Quelle ohne Titel)";
+}
+
 /// <summary>Scope is "person" or "family" — family events (Marriage etc.)
 /// live on the Family object in Gramps, FamilyHandle says which one.</summary>
 public sealed record PersonEvent(
     string Handle, string GrampsId, string Type, string Role,
     string? DateText, int? SortYear, string? Place, string? Description,
-    int CitationCount, string? Scope = null, string? FamilyHandle = null);
+    int CitationCount, string? Scope = null, string? FamilyHandle = null,
+    List<CitationRef>? Citations = null);
 
 public sealed record FamilyInfo(
     string Handle, string GrampsId, PersonBrief? Spouse, List<PersonBrief> Children)
@@ -64,7 +79,8 @@ public sealed record PersonDetail(
     string Handle, string GrampsId, string PrimaryName, string Gender,
     int CitationCount, List<NameInfo> Names, List<PersonEvent> Events,
     List<PersonBrief> Parents, List<FamilyInfo> Families,
-    LifeEvent? Birth = null, LifeEvent? Death = null);
+    LifeEvent? Birth = null, LifeEvent? Death = null,
+    List<CitationRef>? Citations = null);
 
 // ---- /sources, /repositories (5.6) ----------------------------------
 
@@ -221,6 +237,21 @@ public sealed record AttachedTo(string Type, string Handle, string? GrampsId);
 
 public sealed record CaptureResponse(
     string? RequestId, CreatedInfo Created, List<AttachedTo> AttachedTo,
+    string TransactionLabel);
+
+// ---- POST /citations/{handle}/attach (5.8) ---------------------------
+
+public sealed class AttachRequest
+{
+    public string? RequestId { get; set; }
+    public required List<TargetRef> Targets { get; set; }
+}
+
+public sealed record AttachedObject(
+    string Type, string Handle, string? GrampsId, bool WasExisting);
+
+public sealed record AttachResponse(
+    string? RequestId, CreatedNote Citation, List<AttachedObject> AttachedTo,
     string TransactionLabel);
 
 // ---- error envelope (5.1) --------------------------------------------
