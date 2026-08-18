@@ -7,14 +7,16 @@ namespace GrampsBridgeTester;
 
 /// <summary>
 /// Prototype of the "Gramps-Modus" view (spec 7.3): search, walkable
-/// mini-tree, click-to-assign staging queue, batch upload with in-place
-/// read-back. Manual entry fields stand in for scraped data.
+/// mini-tree, and a change list ("Änderungsliste") — every user action
+/// (drop a citation, add an event) is recorded as a deletable entry;
+/// upload executes the list with dependency ordering and shared-citation
+/// coalescing, then reads the displayed slice back in place.
 /// </summary>
 public sealed class MainViewModel : ObservableObject
 {
     private BridgeClient? _client;
-    private PersonDetail? _centerDetail;
     private bool _suppressFamilyReload;
+    private List<PersonEvent> _serverEvents = [];
 
     public MainViewModel()
     {
@@ -22,19 +24,16 @@ public sealed class MainViewModel : ObservableObject
         ConnectCommand = new RelayCommand(async void () => await ConnectAsync());
         SearchCommand = new RelayCommand(async void () => await SearchAsync(),
                                          () => _client is not null);
-        QueueCommand = new RelayCommand(QueueAssignment,
-                                        () => Center is not null);
         SendCommand = new RelayCommand(async void () => await SendAllAsync(),
-            () => _client is not null
-                  && Queue.Any(a => a.Status == AssignmentStatus.Pending));
+            () => _client is not null && Changes.Count > 0);
+        AddEventCommand = new RelayCommand(AddPendingEvent,
+                                           () => Center is not null);
         NavigateCommand = new RelayCommand<PersonBoxVM>(
             async void (box) => await LoadCenterAsync(box.Handle),
             box => !box.IsPlaceholder);
-        TogglePersonCommand = new RelayCommand<PersonBoxVM>(
-            box => { box.IsDraftTarget = !box.IsDraftTarget; },
-            box => !box.IsPlaceholder);
-        ToggleFactCommand = new RelayCommand<FactRowVM>(
-            fact => { fact.IsDraftTarget = !fact.IsDraftTarget; });
+        ToggleFactCommand = new RelayCommand<FactRowVM>(DropFindOnFact);
+        DeleteEntryCommand = new RelayCommand<ChangeEntry>(DeleteEntry);
+        DeleteGroupCommand = new RelayCommand<ChangeGroupVM>(DeleteGroup);
         SourceKey = DeriveSourceKey(SourceTitle);
         Permalink = ComputePermalink();
     }
@@ -145,8 +144,6 @@ public sealed class MainViewModel : ObservableObject
     private PersonBoxVM? _spouse;
     public PersonBoxVM? Spouse { get => _spouse; set => Set(ref _spouse, value); }
 
-    // fixed positions: man left, woman right — selecting the bride only
-    // moves the blue frame, never swaps boxes
     private PersonBoxVM? _leftBox;
     public PersonBoxVM? LeftBox { get => _leftBox; set => Set(ref _leftBox, value); }
 
@@ -155,14 +152,14 @@ public sealed class MainViewModel : ObservableObject
 
     public ObservableCollection<PersonBoxVM> LeftParentsRow { get; } = [];
     public ObservableCollection<PersonBoxVM> RightParentsRow { get; } = [];
-
-    private List<PersonBrief> _centerParents = [];
-    private string _centerGender = "U";
     public ObservableCollection<PersonBoxVM> ChildrenRow { get; } = [];
     public ObservableCollection<FactRowVM> Facts { get; } = [];
     public ObservableCollection<FamilyInfo> Families { get; } = [];
 
     public bool HasMultipleFamilies => Families.Count > 1;
+
+    private List<PersonBrief> _centerParents = [];
+    private string _centerGender = "U";
 
     private FamilyInfo? _selectedFamily;
     public FamilyInfo? SelectedFamily
@@ -176,7 +173,6 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public ICommand NavigateCommand { get; }
-    public ICommand TogglePersonCommand { get; }
     public ICommand ToggleFactCommand { get; }
 
     private async Task LoadCenterAsync(string handle)
@@ -186,7 +182,6 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             var detail = await _client.GetPersonAsync(handle);
-            _centerDetail = detail;
 
             if (Center?.Handle != handle)
                 Center = new PersonBoxVM(handle) { IsCenter = true, IsLarge = true };
@@ -195,7 +190,8 @@ public sealed class MainViewModel : ObservableObject
 
             _centerParents = detail.Parents;
             _centerGender = detail.Gender;
-            SyncFacts(detail.Events);
+            _serverEvents = detail.Events;
+            SyncFacts();
 
             _suppressFamilyReload = true;
             var keepHandle = SelectedFamily?.Handle;
@@ -266,6 +262,7 @@ public sealed class MainViewModel : ObservableObject
         var children = (SelectedFamily?.Children ?? [])
             .Cast<PersonBrief?>().Append(null).ToList();
         SyncRow(ChildrenRow, children);
+        SyncFacts();
         RecomputeBadges();
     }
 
@@ -303,20 +300,37 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private void SyncFacts(IReadOnlyList<PersonEvent> events)
+    /// <summary>Facts = server events of the center person + pending
+    /// create-event entries whose owner is currently displayed. Pending
+    /// rows are keyed by their change-entry id, so they transform into
+    /// the real row in place once the upload read-back delivers it.</summary>
+    private void SyncFacts()
     {
-        if (Facts.Count == events.Count
-            && Facts.Zip(events).All(pair => pair.First.Handle == pair.Second.Handle))
+        var desired = new List<(string Key, Action<FactRowVM> Update)>();
+        foreach (var evt in _serverEvents)
+            desired.Add((evt.Handle, row => row.UpdateFrom(evt)));
+        foreach (var entry in Changes.Where(c => c.Kind == ChangeKind.CreateEvent))
         {
-            foreach (var (row, evt) in Facts.Zip(events))
-                row.UpdateFrom(evt);
+            var visible = entry.OwnerKind == "person"
+                ? entry.OwnerHandle == Center?.Handle
+                : entry.OwnerHandle == SelectedFamily?.Handle;
+            if (visible)
+                desired.Add((entry.Id, row => row.UpdateFromPending(entry)));
+        }
+
+        var same = Facts.Count == desired.Count && Facts.Zip(desired)
+            .All(pair => pair.First.Handle == pair.Second.Key);
+        if (same)
+        {
+            foreach (var (row, want) in Facts.Zip(desired))
+                want.Update(row);
             return;
         }
         Facts.Clear();
-        foreach (var evt in events)
+        foreach (var (key, update) in desired)
         {
-            var row = new FactRowVM(evt.Handle);
-            row.UpdateFrom(evt);
+            var row = new FactRowVM(key);
+            update(row);
             Facts.Add(row);
         }
     }
@@ -430,7 +444,17 @@ public sealed class MainViewModel : ObservableObject
     private bool _copyLinkToPersons = true;
     public bool CopyLinkToPersons { get => _copyLinkToPersons; set => Set(ref _copyLinkToPersons, value); }
 
-    // ---- new-event draft --------------------------------------------
+    private FindSnapshot SnapshotFind() => new()
+    {
+        RepoName = RepoName, RepoUrl = RepoUrl,
+        SourceTitle = SourceTitle, SourceAuthor = SourceAuthor,
+        SourceKey = SourceKey, CallNumber = CallNumber,
+        Page = CitationPage, DateText = CitationDate,
+        Confidence = Confidence, Permalink = Permalink,
+        NoteText = NoteText, CopyLinkToPersons = CopyLinkToPersons,
+    };
+
+    // ---- new-event draft controls -----------------------------------
 
     public string[] EventTypes { get; } =
         ["Baptism", "Christening", "Birth", "Marriage", "Death", "Burial",
@@ -439,239 +463,393 @@ public sealed class MainViewModel : ObservableObject
     private static readonly HashSet<string> s_familyEventTypes =
         ["Marriage", "Marriage Banns", "Engagement", "Divorce"];
 
-    private bool _draftNewEvent;
-    public bool DraftNewEvent { get => _draftNewEvent; set => Set(ref _draftNewEvent, value); }
-
     private string _eventType = "Baptism";
     public string EventType { get => _eventType; set => Set(ref _eventType, value); }
 
     private string _eventDescription = "";
     public string EventDescription { get => _eventDescription; set => Set(ref _eventDescription, value); }
 
-    // ---- staging queue ----------------------------------------------
+    public ICommand AddEventCommand { get; }
 
-    public ObservableCollection<AssignmentVM> Queue { get; } = [];
+    // ---- the change list ("Änderungsliste") --------------------------
+
+    public ObservableCollection<ChangeEntry> Changes { get; } = [];
+    public ObservableCollection<ChangeGroupVM> ChangeTree { get; } = [];
 
     private string _queueStatus = "";
     public string QueueStatus { get => _queueStatus; set => Set(ref _queueStatus, value); }
 
-    public ICommand QueueCommand { get; }
     public ICommand SendCommand { get; }
+    public ICommand DeleteEntryCommand { get; }
+    public ICommand DeleteGroupCommand { get; }
 
-    private void QueueAssignment()
+    /// <summary>Drop on a person box: record "citation → person".</summary>
+    public void DropFindOnPerson(PersonBoxVM box)
     {
-        var targets = new List<TargetRefVM>();
-        foreach (var fact in Facts.Where(f => f.IsDraftTarget))
-            targets.Add(new TargetRefVM
-            { Kind = "event", Handle = fact.Handle, Label = fact.Label });
-        foreach (var box in AllBoxes().Where(b => b.IsDraftTarget))
-            targets.Add(new TargetRefVM
-            { Kind = "person", Handle = box.Handle, Label = box.Name });
-
-        NewEventVM? newEvent = null;
-        if (DraftNewEvent)
-        {
-            if (s_familyEventTypes.Contains(EventType))
-            {
-                if (SelectedFamily is null)
-                {
-                    QueueStatus = $"{EventType} ist ein Familienereignis — "
-                                  + "keine Familie vorhanden";
-                    return;
-                }
-                newEvent = new NewEventVM
-                {
-                    EventType = EventType,
-                    OwnerKind = "family",
-                    OwnerHandle = SelectedFamily.Handle,
-                    OwnerLabel = "Familie " + (SelectedFamily.Spouse?.PrimaryName
-                                               ?? Center?.Name ?? ""),
-                    Description = NullIfEmpty(EventDescription),
-                };
-            }
-            else
-            {
-                if (Center is null)
-                    return;
-                newEvent = new NewEventVM
-                {
-                    EventType = EventType,
-                    OwnerKind = "person",
-                    OwnerHandle = Center.Handle,
-                    OwnerLabel = Center.Name,
-                    Description = NullIfEmpty(EventDescription),
-                };
-            }
-        }
-
-        if (targets.Count == 0 && newEvent is null)
-        {
-            QueueStatus = "keine Ziele markiert (📎 an Ereignis oder Person)";
+        var find = SnapshotFind();
+        if (HasDuplicate(find, "person", box.Handle))
             return;
-        }
-
-        Queue.Add(new AssignmentVM
+        Changes.Add(new ChangeEntry
         {
-            RepoName = RepoName, RepoUrl = RepoUrl,
-            SourceTitle = SourceTitle, SourceAuthor = SourceAuthor,
-            SourceKey = SourceKey, CallNumber = CallNumber,
-            Page = CitationPage, DateText = CitationDate,
-            Confidence = Confidence, Permalink = Permalink,
-            NoteText = NoteText, CopyLinkToPersons = CopyLinkToPersons,
-            Targets = targets, NewEvent = newEvent,
+            Kind = ChangeKind.AttachCitation,
+            Find = find,
+            EntityKey = box.Handle,
+            EntityLabel = box.Name,
+            TargetKind = "person",
+            TargetHandle = box.Handle,
+            TargetLabel = box.Name,
         });
-
-        foreach (var fact in Facts)
-            fact.IsDraftTarget = false;
-        foreach (var box in AllBoxes())
-            box.IsDraftTarget = false;
-        DraftNewEvent = false;
-        RecomputeBadges();
-        QueueStatus = $"{Queue.Count(a => a.Status == AssignmentStatus.Pending)} "
-                      + "Zuordnung(en) ausstehend";
+        AfterChangesMutation($"Änderung erfasst: Zitat {find.Page} → {box.Name}");
     }
 
-    private CaptureRequest BuildRequest(AssignmentVM assignment)
+    /// <summary>Drop on a fact row (real or pending event).</summary>
+    public void DropFindOnFact(FactRowVM fact)
     {
-        var date = ParseDate(assignment.DateText);
+        var find = SnapshotFind();
+        var targetKind = fact.IsPendingNew ? "pending-event" : "event";
+        if (HasDuplicate(find, targetKind, fact.Handle))
+            return;
+        var (entityKey, entityLabel) = FactEntity(fact);
+        Changes.Add(new ChangeEntry
+        {
+            Kind = ChangeKind.AttachCitation,
+            Find = find,
+            EntityKey = entityKey,
+            EntityLabel = entityLabel,
+            DependsOnId = fact.IsPendingNew ? fact.Handle : null,
+            TargetKind = targetKind,
+            TargetHandle = fact.Handle,
+            TargetLabel = fact.Label,
+        });
+        AfterChangesMutation($"Änderung erfasst: Zitat {find.Page} → {fact.Label}");
+    }
+
+    /// <summary>"+ Ereignis vormerken": record a create-event change; a
+    /// pending row appears in the facts list and is itself a drop target.</summary>
+    private void AddPendingEvent()
+    {
+        if (Center is null)
+            return;
+        var find = SnapshotFind();
+        string ownerKind, ownerHandle, entityLabel;
+        if (s_familyEventTypes.Contains(EventType))
+        {
+            if (SelectedFamily is null)
+            {
+                QueueStatus = $"{EventType} ist ein Familienereignis — "
+                              + "keine Familie vorhanden";
+                return;
+            }
+            ownerKind = "family";
+            ownerHandle = SelectedFamily.Handle;
+            entityLabel = "Familie: " + Center.Name
+                + (SelectedFamily.Spouse?.PrimaryName is { } spouse ? " ⚭ " + spouse : "");
+        }
+        else
+        {
+            ownerKind = "person";
+            ownerHandle = Center.Handle;
+            entityLabel = Center.Name;
+        }
+        Changes.Add(new ChangeEntry
+        {
+            Kind = ChangeKind.CreateEvent,
+            Find = find,
+            EntityKey = ownerHandle,
+            EntityLabel = entityLabel,
+            EventType = EventType,
+            OwnerKind = ownerKind,
+            OwnerHandle = ownerHandle,
+            EventDescription = NullIfEmpty(EventDescription),
+        });
+        AfterChangesMutation($"Änderung erfasst: neues Ereignis {EventType}");
+    }
+
+    private bool HasDuplicate(FindSnapshot find, string targetKind, string handle)
+    {
+        var duplicate = Changes.Any(c =>
+            c.Kind == ChangeKind.AttachCitation
+            && c.Find.GroupKey == find.GroupKey
+            && c.TargetKind == targetKind && c.TargetHandle == handle);
+        if (duplicate)
+            QueueStatus = "bereits vorgemerkt (Eintrag in der Änderungsliste)";
+        return duplicate;
+    }
+
+    private (string Key, string Label) FactEntity(FactRowVM fact)
+    {
+        if (fact.Scope == "family" && fact.FamilyHandle is { } familyHandle)
+        {
+            var family = Families.FirstOrDefault(f => f.Handle == familyHandle);
+            var label = "Familie: " + (Center?.Name ?? "?")
+                + (family?.Spouse?.PrimaryName is { } spouse ? " ⚭ " + spouse : "");
+            return (familyHandle, label);
+        }
+        return (Center?.Handle ?? "?", Center?.Name ?? "?");
+    }
+
+    private void DeleteEntry(ChangeEntry entry)
+    {
+        var doomed = CollectWithDependents(entry);
+        if (doomed.Count > 1)
+        {
+            var answer = System.Windows.MessageBox.Show(
+                $"Entfernt auch {doomed.Count - 1} abhängige Änderung(en). Fortfahren?",
+                "Änderung löschen", System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question);
+            if (answer != System.Windows.MessageBoxResult.Yes)
+                return;
+        }
+        foreach (var item in doomed)
+            Changes.Remove(item);
+        AfterChangesMutation($"{doomed.Count} Änderung(en) entfernt");
+    }
+
+    private void DeleteGroup(ChangeGroupVM group)
+    {
+        var doomed = Changes.Where(c => c.EntityKey == group.EntityKey).ToList();
+        var answer = System.Windows.MessageBox.Show(
+            $"Alle {doomed.Count} Änderung(en) für \"{group.EntityLabel}\" löschen?",
+            "Änderungen löschen", System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Question);
+        if (answer != System.Windows.MessageBoxResult.Yes)
+            return;
+        foreach (var item in doomed)
+            Changes.Remove(item);
+        AfterChangesMutation($"{doomed.Count} Änderung(en) entfernt");
+    }
+
+    private List<ChangeEntry> CollectWithDependents(ChangeEntry root)
+    {
+        var result = new List<ChangeEntry> { root };
+        for (var i = 0; i < result.Count; i++)
+            result.AddRange(Changes.Where(c => c.DependsOnId == result[i].Id
+                                               && !result.Contains(c)));
+        return result;
+    }
+
+    private void AfterChangesMutation(string status)
+    {
+        SyncFacts();
+        RecomputeBadges();
+        RebuildChangeTree();
+        QueueStatus = $"{status} — {Changes.Count} Änderung(en) offen";
+    }
+
+    private void RebuildChangeTree()
+    {
+        ChangeTree.Clear();
+        foreach (var groupEntries in Changes.GroupBy(c => c.EntityKey))
+        {
+            var group = new ChangeGroupVM
+            {
+                EntityKey = groupEntries.Key,
+                EntityLabel = groupEntries.First().EntityLabel,
+            };
+            var nodes = groupEntries.ToDictionary(c => c.Id, c => new ChangeNodeVM(c));
+            foreach (var entry in groupEntries)
+            {
+                if (entry.DependsOnId is { } parent
+                    && nodes.TryGetValue(parent, out var parentNode))
+                    parentNode.Children.Add(nodes[entry.Id]);
+                else
+                    group.Children.Add(nodes[entry.Id]);
+            }
+            ChangeTree.Add(group);
+        }
+    }
+
+    private void RecomputeBadges()
+    {
+        foreach (var fact in Facts)
+            fact.PendingCount = Changes.Count(c =>
+                c.Kind == ChangeKind.AttachCitation && c.TargetHandle == fact.Handle);
+        foreach (var box in AllBoxes())
+            box.PendingCount = Changes.Count(c =>
+                (c.Kind == ChangeKind.AttachCitation
+                 && c.TargetKind == "person" && c.TargetHandle == box.Handle)
+                || (c.Kind == ChangeKind.CreateEvent
+                    && c.OwnerKind == "person" && c.OwnerHandle == box.Handle));
+    }
+
+    // ---- upload ------------------------------------------------------
+
+    private CaptureRequest BuildRequest(FindSnapshot find, List<TargetRef> targets,
+                                        ChangeEntry? createEvent)
+    {
+        var date = ParseDate(find.DateText);
         var request = new CaptureRequest
         {
             RequestId = Guid.NewGuid().ToString(),
             Repository = new RepositoryBlock
             {
-                Match = new MatchSpec { By = "name", Value = assignment.RepoName },
+                Match = new MatchSpec { By = "name", Value = find.RepoName },
                 CreateIfMissing = new RepositoryCreate
                 {
-                    Name = assignment.RepoName,
+                    Name = find.RepoName,
                     Type = "Website",
-                    Url = NullIfEmpty(assignment.RepoUrl),
+                    Url = NullIfEmpty(find.RepoUrl),
                 },
             },
             Source = new SourceBlock
             {
                 Match = new MatchSpec
                 {
-                    By = "attribute", Key = "MH_SourceKey",
-                    Value = assignment.SourceKey,
+                    By = "attribute", Key = "MH_SourceKey", Value = find.SourceKey,
                 },
                 CreateIfMissing = new SourceCreate
                 {
-                    Title = assignment.SourceTitle,
-                    Author = NullIfEmpty(assignment.SourceAuthor),
-                    Attributes = [new AttributeKV("MH_SourceKey", assignment.SourceKey)],
+                    Title = find.SourceTitle,
+                    Author = NullIfEmpty(find.SourceAuthor),
+                    Attributes = [new AttributeKV("MH_SourceKey", find.SourceKey)],
                     RepositoryRef = new RepoRefSpec
                     {
-                        CallNumber = NullIfEmpty(assignment.CallNumber),
+                        CallNumber = NullIfEmpty(find.CallNumber),
                         MediaType = "Book",
                     },
                 },
             },
             Citation = new CitationBlock
             {
-                Page = NullIfEmpty(assignment.Page),
+                Page = NullIfEmpty(find.Page),
                 Date = date,
-                Confidence = assignment.Confidence,
-                Attributes = string.IsNullOrWhiteSpace(assignment.Permalink)
+                Confidence = find.Confidence,
+                Attributes = string.IsNullOrWhiteSpace(find.Permalink)
                     ? null
-                    : [new AttributeKV("MH_Permalink", assignment.Permalink)],
-                Notes = string.IsNullOrWhiteSpace(assignment.NoteText)
+                    : [new AttributeKV("MH_Permalink", find.Permalink)],
+                Notes = string.IsNullOrWhiteSpace(find.NoteText)
                     ? null
-                    : [new NoteSpec { Type = "Citation", Text = assignment.NoteText }],
+                    : [new NoteSpec { Type = "Citation", Text = find.NoteText }],
             },
         };
-        if (assignment.Targets.Count > 0)
-            request.Targets = assignment.Targets
-                .Select(t => new TargetRef { Type = t.Kind, Handle = t.Handle })
-                .ToList();
-        if (assignment.NewEvent is { } newEvent)
+        if (targets.Count > 0)
+            request.Targets = targets;
+        if (createEvent is not null)
         {
             request.CreateEventIfMissing = new CreateEventBlock
             {
-                PersonHandle = newEvent.OwnerKind == "person" ? newEvent.OwnerHandle : null,
-                FamilyHandle = newEvent.OwnerKind == "family" ? newEvent.OwnerHandle : null,
-                EventType = newEvent.EventType,
+                PersonHandle = createEvent.OwnerKind == "person"
+                    ? createEvent.OwnerHandle : null,
+                FamilyHandle = createEvent.OwnerKind == "family"
+                    ? createEvent.OwnerHandle : null,
+                EventType = createEvent.EventType!,
                 Date = date,
-                Description = newEvent.Description,
+                Description = createEvent.EventDescription,
             };
         }
-        if (assignment.CopyLinkToPersons
-            && !string.IsNullOrWhiteSpace(assignment.Permalink))
+        if (find.CopyLinkToPersons && !string.IsNullOrWhiteSpace(find.Permalink))
         {
             request.PersonUrl = new PersonUrlSpec
             {
-                Path = assignment.Permalink.Trim(),
-                Description = assignment.NewEvent?.Label
-                    ?? assignment.Targets.FirstOrDefault(t => t.Kind == "event")?.Label
-                    ?? "Beleg " + assignment.Page,
+                Path = find.Permalink.Trim(),
+                Description = createEvent is not null
+                    ? $"{createEvent.EventType} {find.DateText}"
+                    : "Beleg " + find.Page,
                 Type = "Digitalisat",
             };
         }
         return request;
     }
 
+    /// <summary>Executes the change list: create-event entries first
+    /// (each coalesced with same-record citation drops into ONE capture
+    /// sharing the citation), then remaining citation attaches grouped
+    /// per record. Successes leave the list; failures stay marked.</summary>
     private async Task SendAllAsync()
     {
         if (_client is null)
             return;
-        var pending = Queue.Where(a => a.Status == AssignmentStatus.Pending).ToList();
+        var creates = Changes.Where(c => c.Kind == ChangeKind.CreateEvent).ToList();
+        var attaches = Changes.Where(c => c.Kind == ChangeKind.AttachCitation).ToList();
+        var createdEventHandles = new Dictionary<string, string>();
         var succeeded = 0;
-        foreach (var assignment in pending)
+        var failed = 0;
+
+        async Task RunCapture(FindSnapshot find, List<TargetRef> targets,
+                              ChangeEntry? createEvent, List<ChangeEntry> covered)
         {
             try
             {
-                var request = BuildRequest(assignment);
+                var request = BuildRequest(find, targets, createEvent);
                 Log("capture request", request);
                 var response = await _client.CaptureAsync(request);
                 Log("capture response", response);
-                assignment.CitationId = response.Created.Citation?.GrampsId;
-                assignment.CreatedEventHandle = response.Created.Event?.Handle;
-                assignment.Status = AssignmentStatus.Uploaded;
-                succeeded++;
-            }
-            catch (BridgeException ex)
-            {
-                assignment.Error = $"{ex.Code}: {ex.Message}";
-                assignment.Status = AssignmentStatus.Failed;
+                if (createEvent is not null
+                    && response.Created.Event?.Handle is { } newHandle)
+                    createdEventHandles[createEvent.Id] = newHandle;
+                foreach (var entry in covered)
+                    Changes.Remove(entry);
+                succeeded += covered.Count;
             }
             catch (Exception ex)
             {
-                assignment.Error = ex.Message;
-                assignment.Status = AssignmentStatus.Failed;
+                var message = ex is BridgeException bridgeEx
+                    ? $"{bridgeEx.Code}: {bridgeEx.Message}" : ex.Message;
+                foreach (var entry in covered)
+                    entry.Error = message;
+                failed += covered.Count;
             }
+        }
+
+        // phase A: create events, coalescing same-record citation drops
+        foreach (var create in creates)
+        {
+            var sameRecord = attaches.Where(a =>
+                a.Find.GroupKey == create.Find.GroupKey).ToList();
+            var realTargets = sameRecord.Where(a => a.TargetKind is "person" or "event")
+                .ToList();
+            var redundant = sameRecord.Where(a =>
+                a.TargetKind == "pending-event" && a.TargetHandle == create.Id).ToList();
+            var covered = new List<ChangeEntry> { create };
+            covered.AddRange(realTargets);
+            covered.AddRange(redundant);   // create's own citation covers these
+            foreach (var entry in realTargets.Concat(redundant))
+                attaches.Remove(entry);
+            await RunCapture(create.Find,
+                realTargets.Select(a => new TargetRef
+                { Type = a.TargetKind!, Handle = a.TargetHandle! }).ToList(),
+                create, covered);
+        }
+
+        // phase B: remaining citation drops, one capture per record
+        foreach (var group in attaches.GroupBy(a => a.Find.GroupKey))
+        {
+            var targets = new List<TargetRef>();
+            var covered = new List<ChangeEntry>();
+            var blocked = false;
+            foreach (var entry in group)
+            {
+                var handle = entry.TargetKind == "pending-event"
+                    ? createdEventHandles.GetValueOrDefault(entry.TargetHandle!)
+                    : entry.TargetHandle;
+                if (handle is null)
+                {
+                    entry.Error = "Voraussetzung (neues Ereignis) nicht ausgeführt";
+                    blocked = true;
+                    continue;
+                }
+                targets.Add(new TargetRef
+                {
+                    Type = entry.TargetKind == "pending-event" ? "event" : entry.TargetKind!,
+                    Handle = handle,
+                });
+                covered.Add(entry);
+            }
+            if (blocked)
+                failed += group.Count() - covered.Count;
+            if (covered.Count > 0)
+                await RunCapture(group.First().Find, targets, null, covered);
         }
 
         // spec 7.3: read back the displayed slice, without moving the view
         if (Center is not null)
             await LoadCenterAsync(Center.Handle);
+        SyncFacts();
         RecomputeBadges();
-
-        var failed = pending.Count - succeeded;
-        QueueStatus = $"{succeeded} hochgeladen"
-                      + (failed > 0 ? $", {failed} fehlgeschlagen" : "")
+        RebuildChangeTree();
+        QueueStatus = $"{succeeded} Änderung(en) ausgeführt"
+                      + (failed > 0 ? $", {failed} fehlgeschlagen (in der Liste markiert)" : "")
                       + " — Anzeige aus Gramps aktualisiert";
-    }
-
-    private void RecomputeBadges()
-    {
-        foreach (var fact in Facts)
-        {
-            fact.PendingCount = Queue.Count(a =>
-                a.Status == AssignmentStatus.Pending
-                && a.Targets.Any(t => t.Kind == "event" && t.Handle == fact.Handle));
-            fact.UploadedCount = Queue.Count(a =>
-                a.Status == AssignmentStatus.Uploaded
-                && (a.Targets.Any(t => t.Kind == "event" && t.Handle == fact.Handle)
-                    || a.CreatedEventHandle == fact.Handle));
-        }
-        foreach (var box in AllBoxes())
-        {
-            box.PendingCount = Queue.Count(a =>
-                a.Status == AssignmentStatus.Pending
-                && a.Targets.Any(t => t.Kind == "person" && t.Handle == box.Handle));
-            box.UploadedCount = Queue.Count(a =>
-                a.Status == AssignmentStatus.Uploaded
-                && a.Targets.Any(t => t.Kind == "person" && t.Handle == box.Handle));
-        }
     }
 
     // ---- log ---------------------------------------------------------

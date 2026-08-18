@@ -28,7 +28,9 @@
             <Border x:Name="Box" Margin="5,4" Padding="8,5" CornerRadius="10"
                     Background="#FDFDFD" BorderBrush="#8C8C8C" BorderThickness="1.3"
                     Width="132" Height="70" Cursor="Hand"
-                    ToolTip="{Binding ToolTipText}">
+                    ToolTip="{Binding ToolTipText}"
+                    AllowDrop="True" DragOver="PersonBox_DragOver"
+                    Drop="PersonBox_Drop">
                 <Border.InputBindings>
                     <MouseBinding Gesture="LeftClick"
                                   Command="{Binding DataContext.NavigateCommand,
@@ -65,9 +67,6 @@
                     <Setter TargetName="NameLine" Property="Foreground" Value="#1440C8" />
                     <Setter TargetName="BirthLine" Property="Foreground" Value="#1440C8" />
                     <Setter TargetName="DeathLine" Property="Foreground" Value="#1440C8" />
-                </DataTrigger>
-                <DataTrigger Binding="{Binding IsDraftTarget}" Value="True">
-                    <Setter TargetName="Box" Property="Background" Value="#FFF6DE" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
                     <Setter TargetName="Box" Property="BorderBrush" Value="#C8C8C8" />
@@ -226,28 +225,44 @@
                             <ItemsControl ItemsSource="{Binding Facts}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type local:FactRowVM}">
-                                        <DockPanel Margin="0,1">
-                                            <ToggleButton DockPanel.Dock="Left" Content="📎"
-                                                          Width="28" FontSize="11"
-                                                          IsChecked="{Binding IsDraftTarget}"
-                                                          ToolTip="Fund diesem Ereignis zuordnen" />
-                                            <TextBlock DockPanel.Dock="Right"
-                                                       Text="{Binding Badges}" Foreground="#B36B00"
-                                                       VerticalAlignment="Center" Margin="6,0,0,0" />
-                                            <TextBlock DockPanel.Dock="Right" Foreground="Gray"
-                                                       VerticalAlignment="Center" Margin="6,0,0,0"
-                                                       Text="{Binding CitationCount, StringFormat='Zit. {0}'}" />
-                                            <TextBlock Text="{Binding Label}"
-                                                       VerticalAlignment="Center" Margin="6,0,0,0" />
-                                        </DockPanel>
+                                        <Border x:Name="FactRow" CornerRadius="3" Padding="2,1"
+                                                Background="Transparent"
+                                                AllowDrop="True"
+                                                DragOver="FactRow_DragOver"
+                                                Drop="FactRow_Drop">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Left" Content="📎"
+                                                        Width="28" FontSize="11" Margin="0" Padding="0"
+                                                        Command="{Binding DataContext.ToggleFactCommand,
+                                                                  RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip="Fund diesem Ereignis zuordnen (wie Karte darauf ziehen)" />
+                                                <TextBlock DockPanel.Dock="Right"
+                                                           Text="{Binding Badges}" Foreground="#B36B00"
+                                                           VerticalAlignment="Center" Margin="6,0,0,0" />
+                                                <TextBlock DockPanel.Dock="Right" Foreground="Gray"
+                                                           VerticalAlignment="Center" Margin="6,0,0,0"
+                                                           Text="{Binding CitationCount, StringFormat='Zit. {0}'}" />
+                                                <TextBlock x:Name="FactLabel" Text="{Binding Label}"
+                                                           VerticalAlignment="Center" Margin="6,0,0,0" />
+                                            </DockPanel>
+                                        </Border>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsPendingNew}" Value="True">
+                                                <Setter TargetName="FactRow" Property="Background"
+                                                        Value="#EAF3FF" />
+                                                <Setter TargetName="FactLabel" Property="FontStyle"
+                                                        Value="Italic" />
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <DockPanel Margin="0,6,0,0">
-                                <CheckBox DockPanel.Dock="Left" Content="+ neues Ereignis:"
-                                          IsChecked="{Binding DraftNewEvent}"
-                                          VerticalAlignment="Center" />
-                                <ComboBox Width="130" Margin="6,0"
+                                <Button DockPanel.Dock="Left" Content="+ Ereignis vormerken"
+                                        Margin="0,0,6,0" Command="{Binding AddEventCommand}"
+                                        ToolTip="Erzeugt einen Eintrag in der Änderungsliste und eine (neu)-Zeile oben — auch die ist ein Ablageziel für die Zitatkarte" />
+                                <ComboBox Width="130" Margin="0,0,6,0"
                                           ItemsSource="{Binding EventTypes}"
                                           SelectedItem="{Binding EventType}" />
                                 <TextBox Text="{Binding EventDescription, UpdateSourceTrigger=PropertyChanged}"
@@ -294,31 +309,84 @@
                                  VerticalScrollBarVisibility="Auto" ToolTip="Notiz/Transkription" />
                         <CheckBox IsChecked="{Binding CopyLinkToPersons}"
                                   Content="Link in Internet-Reiter der Beteiligten" />
-                        <Button Content="Zuordnung merken → Warteschlange" FontWeight="SemiBold"
-                                Command="{Binding QueueCommand}" HorizontalAlignment="Left" />
-                        <TextBlock Text="{Binding QueueStatus}" TextWrapping="Wrap"
-                                   FontWeight="SemiBold" />
                     </StackPanel>
                 </GroupBox>
+
+                <!-- the draggable citation card (mockup bottom-left) -->
+                <Border DockPanel.Dock="Top" x:Name="CitationCard"
+                        Background="White" BorderBrush="#B0B0B0" BorderThickness="1"
+                        CornerRadius="4" Padding="10,6" Margin="0,6,0,0"
+                        Cursor="SizeAll"
+                        PreviewMouseLeftButtonDown="CitationCard_PreviewMouseLeftButtonDown"
+                        PreviewMouseMove="CitationCard_PreviewMouseMove">
+                    <StackPanel>
+                        <TextBlock Text="Quelle" FontSize="9.5" Foreground="Gray" />
+                        <TextBlock Text="{Binding SourceTitle}" TextWrapping="Wrap"
+                                   FontSize="12.5" />
+                        <TextBlock Text="{Binding CallNumber, StringFormat='Signatur: {0}'}"
+                                   FontSize="12.5" />
+                        <TextBlock Text="Zitat (neu)" FontSize="9.5" Foreground="Gray"
+                                   Margin="0,4,0,0" />
+                        <DockPanel>
+                            <TextBlock Text="{Binding CitationPage}" FontSize="12.5" />
+                            <TextBlock Text="{Binding CitationDate}" Foreground="Gray"
+                                       FontSize="12.5" Margin="8,0,0,0" />
+                        </DockPanel>
+                        <TextBlock Text="⇖  Karte auf Person oder Ereignis ziehen — jede Ablage wird ein Eintrag in der Änderungsliste"
+                                   FontSize="10" Foreground="#888888" TextWrapping="Wrap"
+                                   Margin="0,6,0,0" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock DockPanel.Dock="Top" Text="{Binding QueueStatus}"
+                           TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,4,0,0" />
 
                 <Button DockPanel.Dock="Bottom" Content="An Gramps senden" FontWeight="Bold"
                         FontSize="14" Command="{Binding SendCommand}" Margin="0,6,0,0" />
 
-                <GroupBox Header="Warteschlange (lokal, wie library.json im echten Client)"
+                <GroupBox Header="Änderungsliste (lokal — Löschen macht rückgängig, Upload führt aus)"
                           Padding="4" Margin="0,6,0,0">
-                    <ListBox ItemsSource="{Binding Queue}" HorizontalContentAlignment="Stretch">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="{x:Type local:AssignmentVM}">
-                                <StackPanel Margin="0,2">
-                                    <TextBlock Text="{Binding Summary}" TextWrapping="Wrap"
-                                               FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding SourceTitle}" FontSize="11"
-                                               Foreground="Gray" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding StatusText}" FontSize="11" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                    <TreeView ItemsSource="{Binding ChangeTree}" BorderThickness="0">
+                        <TreeView.ItemContainerStyle>
+                            <Style TargetType="TreeViewItem">
+                                <Setter Property="IsExpanded" Value="True" />
+                            </Style>
+                        </TreeView.ItemContainerStyle>
+                        <TreeView.Resources>
+                            <HierarchicalDataTemplate DataType="{x:Type local:ChangeGroupVM}"
+                                                      ItemsSource="{Binding Children}">
+                                <DockPanel Margin="0,1">
+                                    <Button DockPanel.Dock="Right" Content="🗑" Padding="3,0"
+                                            Margin="6,0,0,0" FontSize="11"
+                                            ToolTip="Alle Änderungen zu dieser Person/Familie entfernen"
+                                            Command="{Binding DataContext.DeleteGroupCommand,
+                                                      RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
+                                    <TextBlock Text="{Binding EntityLabel}" FontWeight="Bold"
+                                               VerticalAlignment="Center" />
+                                </DockPanel>
+                            </HierarchicalDataTemplate>
+                            <HierarchicalDataTemplate DataType="{x:Type local:ChangeNodeVM}"
+                                                      ItemsSource="{Binding Children}">
+                                <DockPanel Margin="0,1">
+                                    <Button DockPanel.Dock="Right" Content="🗑" Padding="3,0"
+                                            Margin="6,0,0,0" FontSize="10"
+                                            ToolTip="Diese Änderung entfernen (abhängige werden mit entfernt)"
+                                            Command="{Binding DataContext.DeleteEntryCommand,
+                                                      RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding Entry}" />
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Entry.DisplayText}"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Entry.Error}" Foreground="#C00000"
+                                                   FontSize="11" TextWrapping="Wrap"
+                                                   Visibility="{Binding Entry.HasError,
+                                                                Converter={StaticResource BoolToVisibility}}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </HierarchicalDataTemplate>
+                        </TreeView.Resources>
+                    </TreeView>
                 </GroupBox>
             </DockPanel>
         </Grid>

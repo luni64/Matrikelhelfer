@@ -73,9 +73,6 @@ public sealed class PersonBoxVM(string handle) : ObservableObject
     private bool _isCenter;
     public bool IsCenter { get => _isCenter; set => Set(ref _isCenter, value); }
 
-    private bool _isDraftTarget;
-    public bool IsDraftTarget { get => _isDraftTarget; set => Set(ref _isDraftTarget, value); }
-
     private int _pendingCount;
     public int PendingCount
     {
@@ -83,38 +80,11 @@ public sealed class PersonBoxVM(string handle) : ObservableObject
         set { if (Set(ref _pendingCount, value)) OnChanged(nameof(Badges)); }
     }
 
-    private int _uploadedCount;
-    public int UploadedCount
-    {
-        get => _uploadedCount;
-        set { if (Set(ref _uploadedCount, value)) OnChanged(nameof(Badges)); }
-    }
-
     public string Badges =>
-        (PendingCount > 0 ? $"○ {PendingCount} ausstehend  " : "")
-        + (UploadedCount > 0 ? $"● {UploadedCount} in Gramps" : "");
+        PendingCount > 0 ? $"○ {PendingCount} Änderung(en)" : "";
 
     private string _toolTipText = "";
     public string ToolTipText { get => _toolTipText; set => Set(ref _toolTipText, value); }
-
-    /// <summary>shortPlace: only the lowest hierarchy level ("Freilassing"
-    /// instead of "Freilassing, Traunstein, Bayern, Deutschland").</summary>
-    private static string LifeLine(string prefix, LifeEvent? life, bool shortPlace)
-    {
-        if (life is null)
-            return "";
-        var parts = new List<string>();
-        if (life.DateText is { Length: > 0 } date)
-            parts.Add(date);
-        var place = life.Place;
-        if (place is { Length: > 0 })
-        {
-            if (shortPlace)
-                place = place.Split(',')[0].Trim();
-            parts.Add($"({place})");
-        }
-        return parts.Count == 0 ? "" : prefix + " " + string.Join(" ", parts);
-    }
 
     /// <summary>Box line: year only, lowest place level, no parentheses —
     /// "* 1745 Unterhausen". The tooltip keeps the full form.</summary>
@@ -132,6 +102,18 @@ public sealed class PersonBoxVM(string handle) : ObservableObject
         return parts.Count == 0 ? "" : prefix + " " + string.Join(" ", parts);
     }
 
+    private static string LifeLine(string prefix, LifeEvent? life)
+    {
+        if (life is null)
+            return "";
+        var parts = new List<string>();
+        if (life.DateText is { Length: > 0 } date)
+            parts.Add(date);
+        if (life.Place is { Length: > 0 } place)
+            parts.Add($"({place})");
+        return parts.Count == 0 ? "" : prefix + " " + string.Join(" ", parts);
+    }
+
     public void UpdateFrom(PersonBrief brief)
     {
         Name = brief.PrimaryName ?? "(ohne Name)";
@@ -141,16 +123,17 @@ public sealed class PersonBoxVM(string handle) : ObservableObject
         ToolTipText = string.Join("\n", new[]
         {
             Name + (GrampsId.Length > 0 ? $"  [{GrampsId}]" : ""),
-            LifeLine("*", brief.Birth, shortPlace: false),
-            LifeLine("+", brief.Death, shortPlace: false),
+            LifeLine("*", brief.Birth),
+            LifeLine("+", brief.Death),
         }.Where(line => line.Length > 0));
     }
 }
 
-/// <summary>One row in the facts/events list of the center person.</summary>
+/// <summary>One row in the facts/events list: a real Gramps event, or a
+/// pending one produced by a create-event change entry.</summary>
 public sealed class FactRowVM(string handle) : ObservableObject
 {
-    public string Handle { get; } = handle;
+    public string Handle { get; } = handle;   // event handle | change-entry id
 
     private string _label = "";
     public string Label { get => _label; set => Set(ref _label, value); }
@@ -163,8 +146,8 @@ public sealed class FactRowVM(string handle) : ObservableObject
     private int _citationCount;
     public int CitationCount { get => _citationCount; set => Set(ref _citationCount, value); }
 
-    private bool _isDraftTarget;
-    public bool IsDraftTarget { get => _isDraftTarget; set => Set(ref _isDraftTarget, value); }
+    private bool _isPendingNew;
+    public bool IsPendingNew { get => _isPendingNew; set => Set(ref _isPendingNew, value); }
 
     private int _pendingCount;
     public int PendingCount
@@ -173,16 +156,7 @@ public sealed class FactRowVM(string handle) : ObservableObject
         set { if (Set(ref _pendingCount, value)) OnChanged(nameof(Badges)); }
     }
 
-    private int _uploadedCount;
-    public int UploadedCount
-    {
-        get => _uploadedCount;
-        set { if (Set(ref _uploadedCount, value)) OnChanged(nameof(Badges)); }
-    }
-
-    public string Badges =>
-        (PendingCount > 0 ? $"○{PendingCount} " : "")
-        + (UploadedCount > 0 ? $"●{UploadedCount}" : "");
+    public string Badges => PendingCount > 0 ? $"○{PendingCount}" : "";
 
     public void UpdateFrom(PersonEvent evt)
     {
@@ -194,31 +168,25 @@ public sealed class FactRowVM(string handle) : ObservableObject
         Scope = evt.Scope ?? "person";
         FamilyHandle = evt.FamilyHandle;
         CitationCount = evt.CitationCount;
+        IsPendingNew = false;
+    }
+
+    public void UpdateFromPending(ChangeEntry entry)
+    {
+        Label = $"(neu) {entry.EventType}"
+            + (entry.Find.DateText is { Length: > 0 } date ? " " + date : "")
+            + (entry.OwnerKind == "family" ? "  [Familie]" : "");
+        Scope = entry.OwnerKind == "family" ? "family" : "person";
+        FamilyHandle = entry.OwnerKind == "family" ? entry.OwnerHandle : null;
+        CitationCount = 0;
+        IsPendingNew = true;
     }
 }
 
-public sealed class TargetRefVM
-{
-    public required string Kind { get; init; }      // person | event
-    public required string Handle { get; init; }
-    public required string Label { get; init; }
-}
-
-public sealed class NewEventVM
-{
-    public required string EventType { get; init; }
-    public required string OwnerKind { get; init; }  // person | family
-    public required string OwnerHandle { get; init; }
-    public required string OwnerLabel { get; init; }
-    public string? Description { get; init; }
-    public string Label => $"{EventType} (neu, {OwnerLabel})";
-}
-
-public enum AssignmentStatus { Pending, Uploaded, Failed }
-
-/// <summary>A staged "find X evidences targets Y" entry — the local
-/// queue of spec 7.3. Snapshot of the find fields at assignment time.</summary>
-public sealed class AssignmentVM : ObservableObject
+/// <summary>Frozen copy of the find fields at the moment of a change.
+/// GroupKey identifies "same record" for upload-time coalescing into one
+/// shared citation (in the real app this is simply the Finding id).</summary>
+public sealed class FindSnapshot
 {
     public required string RepoName { get; init; }
     public required string RepoUrl { get; init; }
@@ -232,41 +200,61 @@ public sealed class AssignmentVM : ObservableObject
     public required string Permalink { get; init; }
     public required string NoteText { get; init; }
     public required bool CopyLinkToPersons { get; init; }
-    public List<TargetRefVM> Targets { get; init; } = [];
-    public NewEventVM? NewEvent { get; init; }
 
-    private AssignmentStatus _status = AssignmentStatus.Pending;
-    public AssignmentStatus Status
-    {
-        get => _status;
-        set { if (Set(ref _status, value)) OnChanged(nameof(StatusText)); }
-    }
+    public string GroupKey =>
+        string.Join("|", SourceKey, Page, DateText, Permalink, NoteText, Confidence);
+}
+
+public enum ChangeKind { AttachCitation, CreateEvent }
+
+/// <summary>One entry of the change list ("Änderungsliste"): a recorded
+/// user action, executed at upload. DependsOnId links an entry to the
+/// entry producing its target (e.g. citation on a pending event) — the
+/// dependency tree doubles as the display tree, and deletion cascades
+/// along it.</summary>
+public sealed class ChangeEntry : ObservableObject
+{
+    public string Id { get; } = Guid.NewGuid().ToString("N");
+    public required ChangeKind Kind { get; init; }
+    public required FindSnapshot Find { get; init; }
+    public required string EntityKey { get; init; }      // person/family handle
+    public required string EntityLabel { get; init; }
+    public string? DependsOnId { get; init; }
+
+    // AttachCitation
+    public string? TargetKind { get; init; }             // person | event | pending-event
+    public string? TargetHandle { get; init; }           // handle | change-entry id
+    public string? TargetLabel { get; init; }
+
+    // CreateEvent
+    public string? EventType { get; init; }
+    public string? OwnerKind { get; init; }              // person | family
+    public string? OwnerHandle { get; init; }
+    public string? EventDescription { get; init; }
 
     private string? _error;
     public string? Error
     {
         get => _error;
-        set { if (Set(ref _error, value)) OnChanged(nameof(StatusText)); }
+        set { if (Set(ref _error, value)) OnChanged(nameof(HasError)); }
     }
 
-    public string? CitationId { get; set; }
-    public string? CreatedEventHandle { get; set; }
+    public bool HasError => Error is not null;
 
-    public string StatusText => Status switch
-    {
-        AssignmentStatus.Uploaded => $"● in Gramps ({CitationId})",
-        AssignmentStatus.Failed => "✕ " + (Error ?? "Fehler"),
-        _ => "○ ausstehend",
-    };
+    public string DisplayText => Kind == ChangeKind.CreateEvent
+        ? $"Neues Ereignis: {EventType} — mit Zitat {Find.Page}"
+        : $"Zitat {Find.Page} → {TargetLabel}";
+}
 
-    public string Summary
-    {
-        get
-        {
-            var targets = Targets.Select(t => t.Label).ToList();
-            if (NewEvent is not null)
-                targets.Add(NewEvent.Label);
-            return $"{Page} → {string.Join(", ", targets)}";
-        }
-    }
+public sealed class ChangeNodeVM(ChangeEntry entry)
+{
+    public ChangeEntry Entry { get; } = entry;
+    public List<ChangeNodeVM> Children { get; } = [];
+}
+
+public sealed class ChangeGroupVM
+{
+    public required string EntityKey { get; init; }
+    public required string EntityLabel { get; init; }
+    public List<ChangeNodeVM> Children { get; } = [];
 }
