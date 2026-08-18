@@ -104,6 +104,21 @@ public sealed record RepositoryHit(
 
 public sealed record RepositorySearchResponse(int Total, List<RepositoryHit> Results);
 
+// ---- GET /event-types ------------------------------------------------
+
+/// <summary>Xml is the locale-independent name the capture endpoint
+/// consumes (set_from_xml_str); Label is what the user sees. IsFamily
+/// mirrors the Gramps "Family" menu group — those events belong on the
+/// Family object, not the person.</summary>
+public sealed record EventTypeInfo(string Xml, string Label, bool IsFamily);
+
+public sealed record EventTypeGroup(string Name, List<EventTypeInfo> Types);
+
+/// <summary>The Gramps event editor's structured type catalog plus the
+/// custom types already used in the open tree.</summary>
+public sealed record EventTypeCatalog(
+    List<EventTypeGroup> Groups, List<string> Custom);
+
 // ---- POST /capture request (5.7 / 5.9) -------------------------------
 
 public sealed class DateSpec

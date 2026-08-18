@@ -28,8 +28,8 @@ public sealed class MainViewModel : ObservableObject
                                          () => _client is not null);
         SendCommand = new RelayCommand(async void () => await SendAllAsync(),
             () => _client is not null && Changes.Count > 0);
-        AddEventCommand = new RelayCommand(AddPendingEvent,
-                                           () => Center is not null);
+        AddEventCommand = new RelayCommand(OpenAddEventDialog,
+            () => Center is not null && EventTypeChoices.Count > 0);
         NavigateCommand = new RelayCommand<PersonBoxVM>(
             async void (box) => await LoadCenterAsync(box.Handle),
             box => !box.IsPlaceholder);
@@ -79,6 +79,8 @@ public sealed class MainViewModel : ObservableObject
             ConnectionStatus =
                 $"connected: Gramps {ping.GrampsVersion}, addon {ping.AddonVersion}, "
                 + (ping.TreeOpen ? $"tree \"{ping.TreeName}\"" : "NO TREE OPEN");
+            if (ping.TreeOpen)
+                await LoadEventTypesAsync();
         }
         catch (Exception ex)
         {
@@ -840,18 +842,54 @@ public sealed class MainViewModel : ObservableObject
 
     // ---- new-event draft controls -----------------------------------
 
-    public string[] EventTypes { get; } =
-        ["Baptism", "Christening", "Birth", "Marriage", "Death", "Burial",
-         "Occupation", "Residence"];
+    /// <summary>Grouped like the Gramps event editor, fetched from
+    /// GET /event-types on connect (incl. the tree's custom types and
+    /// the is_family flag — no hardcoded lists).</summary>
+    public ObservableCollection<EventTypeChoice> EventTypeChoices { get; } = [];
 
-    private static readonly HashSet<string> s_familyEventTypes =
-        ["Marriage", "Marriage Banns", "Engagement", "Divorce"];
+    /// <summary>Preselected in the next dialog (last chosen type —
+    /// series of same-type finds are the normal case).</summary>
+    private EventTypeChoice? _lastEventType;
 
-    private string _eventType = "Baptism";
-    public string EventType { get => _eventType; set => Set(ref _eventType, value); }
+    private async Task LoadEventTypesAsync()
+    {
+        if (_client is null)
+            return;
+        try
+        {
+            var catalog = await _client.GetEventTypesAsync();
+            var keepXml = _lastEventType?.Xml ?? "Baptism";
+            EventTypeChoices.Clear();
+            foreach (var group in catalog.Groups)
+                foreach (var type in group.Types)
+                    EventTypeChoices.Add(new EventTypeChoice(
+                        group.Name, type.Xml, type.Label, type.IsFamily));
+            foreach (var custom in catalog.Custom)
+                EventTypeChoices.Add(new EventTypeChoice(
+                    "Benutzerdefiniert", custom, custom, IsFamily: false));
+            _lastEventType =
+                EventTypeChoices.FirstOrDefault(t => t.Xml == keepXml);
+        }
+        catch (Exception ex)
+        {
+            // e.g. NO_TREE_OPEN — the dialog stays unavailable until reconnect
+            QueueStatus = "Ereignistypen nicht ladbar: " + ex.Message;
+        }
+    }
 
-    private string _eventDescription = "";
-    public string EventDescription { get => _eventDescription; set => Set(ref _eventDescription, value); }
+    private void OpenAddEventDialog()
+    {
+        if (Center is null || EventTypeChoices.Count == 0)
+            return;
+        var dialog = new EventTypeDialog(EventTypeChoices, _lastEventType)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        if (dialog.ShowDialog() != true || dialog.SelectedType is not { } choice)
+            return;
+        _lastEventType = choice;
+        AddPendingEvent(choice, dialog.Description);
+    }
 
     public ICommand AddEventCommand { get; }
 
@@ -869,17 +907,17 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>"+ Ereignis vormerken": record a create-event change; a
     /// pending row appears in the facts list and is itself a drop target.</summary>
-    private void AddPendingEvent()
+    private void AddPendingEvent(EventTypeChoice eventType, string description)
     {
         if (Center is null)
             return;
         var find = SnapshotFind();
         string ownerKind, ownerHandle, entityLabel;
-        if (s_familyEventTypes.Contains(EventType))
+        if (eventType.IsFamily)
         {
             if (SelectedFamily is null)
             {
-                QueueStatus = $"{EventType} ist ein Familienereignis — "
+                QueueStatus = $"{eventType.Label} ist ein Familienereignis — "
                               + "keine Familie vorhanden";
                 return;
             }
@@ -900,12 +938,13 @@ public sealed class MainViewModel : ObservableObject
             Find = find,
             EntityKey = ownerHandle,
             EntityLabel = entityLabel,
-            EventType = EventType,
+            EventType = eventType.Xml,
+            EventTypeLabel = eventType.Label,
             OwnerKind = ownerKind,
             OwnerHandle = ownerHandle,
-            EventDescription = NullIfEmpty(EventDescription),
+            EventDescription = NullIfEmpty(description),
         });
-        AfterChangesMutation($"Änderung erfasst: neues Ereignis {EventType}");
+        AfterChangesMutation($"Änderung erfasst: neues Ereignis {eventType.Label}");
     }
 
     private (string Key, string Label) FactEntity(FactRowVM fact)

@@ -197,7 +197,7 @@ public sealed class FactRowVM(string handle) : ObservableObject
 
     public void UpdateFromPending(ChangeEntry entry)
     {
-        Label = $"(neu) {entry.EventType}"
+        Label = $"(neu) {entry.EventTypeLabel ?? entry.EventType}"
             + (entry.Find!.DateText is { Length: > 0 } date ? " " + date : "")
             + (entry.OwnerKind == "family" ? "  [Familie]" : "");
         Scope = entry.OwnerKind == "family" ? "family" : "person";
@@ -273,6 +273,13 @@ public sealed class FindSnapshot
         string.Join("|", SourceKey, Page, DateText, Permalink, NoteText, Confidence);
 }
 
+/// <summary>One entry of the grouped event-type ComboBox, from the
+/// bridge's /event-types catalog (= the Gramps event editor's list).
+/// Xml goes to the API, Label to the user, Group to the view's
+/// PropertyGroupDescription.</summary>
+public sealed record EventTypeChoice(
+    string Group, string Xml, string Label, bool IsFamily);
+
 public enum ChangeKind { AttachCitation, CreateEvent, AttachExisting }
 
 /// <summary>One entry of the change list ("Änderungsliste"): a recorded
@@ -298,8 +305,10 @@ public sealed class ChangeEntry : ObservableObject
     public string? CitationHandle { get; init; }
     public string? SourceLabel { get; init; }
 
-    // CreateEvent
+    // CreateEvent — EventType is the locale-independent XML name for
+    // the API, EventTypeLabel the localized display text
     public string? EventType { get; init; }
+    public string? EventTypeLabel { get; init; }
     public string? OwnerKind { get; init; }              // person | family
     public string? OwnerHandle { get; init; }
     public string? EventDescription { get; init; }
@@ -316,7 +325,7 @@ public sealed class ChangeEntry : ObservableObject
     public string DisplayText => Kind switch
     {
         ChangeKind.CreateEvent =>
-            $"Neues Ereignis: {EventType} — mit Zitat {Find!.Page}",
+            $"Neues Ereignis: {EventTypeLabel ?? EventType} — mit Zitat {Find!.Page}",
         ChangeKind.AttachExisting =>
             $"Vorhandenes Zitat „{SourceLabel}“ → {TargetLabel}",
         _ => $"Zitat {Find!.Page} → {TargetLabel}",

@@ -593,3 +593,21 @@ class BridgeApiTests(unittest.TestCase):
         self.assertIn("source_abbrev", ref)   # None here - not captured
         # the person-level citation list is delivered the same way
         self.assertEqual(body["citations"], [])
+
+    # -- GET /event-types (Gramps event-editor catalog) ---------------
+
+    def test_160_event_types_catalog(self):
+        status, body = get("/event-types")
+        self.assertEqual(status, 200)
+        self.assertIsInstance(body["custom"], list)
+        types = {t["xml"]: t for group in body["groups"]
+                 for t in group["types"]}
+        # locale-independent xml names; labels are localized
+        self.assertIn("Baptism", types)
+        self.assertIn("Burial", types)
+        self.assertFalse(types["Birth"]["is_family"])
+        self.assertTrue(types["Marriage"]["is_family"])
+        self.assertTrue(types["Marriage Banns"]["is_family"])
+        self.assertTrue(all(t["label"] for t in types.values()))
+        # the group labels mirror the Gramps event editor's structure
+        self.assertGreaterEqual(len(body["groups"]), 8)

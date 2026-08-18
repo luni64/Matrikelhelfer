@@ -63,6 +63,11 @@ public sealed class BridgeClient(GrampsEndpoint endpoint)
         string? q = null, CancellationToken ct = default) =>
         GetAsync<RepositorySearchResponse>("/repositories" + BuildQuery(("q", q)), ct);
 
+    /// <summary>The Gramps event editor's structured event-type catalog
+    /// (groups + custom types of the open tree).</summary>
+    public Task<EventTypeCatalog> GetEventTypesAsync(CancellationToken ct = default) =>
+        GetAsync<EventTypeCatalog>("/event-types", ct);
+
     public Task<CaptureResponse> CaptureAsync(CaptureRequest request,
                                               CancellationToken ct = default) =>
         PostAsync<CaptureResponse>("/capture", request, ct);

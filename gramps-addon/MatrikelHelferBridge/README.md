@@ -7,9 +7,10 @@ main repo. Current state: **stages 1–6 plus first stage-7 single op**
 (skeleton, gramplet UI, server + marshalling, `/ping`, discovery file, token,
 security checks, person search and detail — events carry their citations
 incl. source title/abbreviation for the client's link view —,
-source/repository search, `POST /capture` with idempotency, and
-`POST /citations/{handle}/attach` to attach an existing citation to further
-objects).
+source/repository search, `GET /event-types` (the Gramps event editor's
+grouped type catalog incl. the tree's custom types), `POST /capture` with
+idempotency, and `POST /citations/{handle}/attach` to attach an existing
+citation to further objects).
 
 ## Files
 
@@ -25,7 +26,7 @@ objects).
 powershell -ExecutionPolicy Bypass -File gramps-addon\tests\run_tests.ps1
 ```
 
-Runs 40 integration tests headless inside the real Gramps runtime
+Runs 41 integration tests headless inside the real Gramps runtime
 (`grampsd.exe` CLI + a test tool plugin): auth/origin/content-type checks,
 person search and detail (incl. the per-event citations block),
 source/repository lookup, full capture, source reuse, idempotent replay,

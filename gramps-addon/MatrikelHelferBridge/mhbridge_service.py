@@ -37,12 +37,13 @@ from gramps.gen.const import USER_DATA, VERSION as GRAMPS_VERSION
 from gramps.gen.errors import HandleError
 
 from mhbridge_capture import InvalidPayload, do_attach, do_capture
+from mhbridge_events import event_type_catalog
 from mhbridge_persons import (DEFAULT_LIMIT, MAX_LIMIT, PersonIndex,
                               person_detail)
 from mhbridge_sources import search_repositories, search_sources
 
 API_VERSION = 1
-ADDON_VERSION = "0.9.0"
+ADDON_VERSION = "0.10.0"
 API_PREFIX = "/api/v1"
 DEFAULT_PORT = 8791
 PORT_SEARCH_RANGE = 20          # FA-2: try DEFAULT_PORT .. +19
@@ -208,6 +209,10 @@ class BridgeService:
     def list_repositories(self, **kwargs):
         db = self._open_db()
         return search_repositories(db, **kwargs)
+
+    def list_event_types(self):
+        db = self._open_db()
+        return event_type_catalog(db)
 
     def capture(self, payload):
         request_id = payload.get("request_id")
@@ -466,6 +471,10 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 args = self._list_args(urllib.parse.parse_qs(parsed.query))
                 self._respond(200, run_in_main(
                     lambda: service.list_repositories(**args)))
+                return
+
+            if self.command == "GET" and path == API_PREFIX + "/event-types":
+                self._respond(200, run_in_main(service.list_event_types))
                 return
 
             if self.command == "POST" and path == API_PREFIX + "/capture":

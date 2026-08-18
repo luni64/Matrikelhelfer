@@ -256,6 +256,23 @@ Zweck: MatrikelHelfer soll vor dem Anlegen einer neuen Quelle prüfen, ob das Ki
 
 Zusätzlich empfohlen: `GET /sources?attribute_key=MH_SourceKey&attribute_value=<key>` für die gezielte Wiedererkennung über einen von MatrikelHelfer vergebenen Schlüssel (siehe §7.2).
 
+### 5.6a `GET /event-types`
+
+Liefert den strukturierten Ereignistyp-Katalog des Gramps-Ereigniseditors (2026-08-18, für die Ereignis-Auswahl im Gramps-Modus — ersetzt die zuvor im Client fest codierte Liste):
+
+```json
+{
+  "groups": [
+    { "name": "Lebensereignisse", "types": [
+        { "xml": "Birth", "label": "Geburt", "is_family": false }, …
+    ]}, …
+  ],
+  "custom": ["<im Baum verwendete eigene Typen>"]
+}
+```
+
+`xml` ist der lokalisierungsunabhängige Name, den `POST /capture` über `set_from_xml_str()` interpretiert; `label` die Anzeige in der Gramps-Sprache. `is_family` spiegelt die Zugehörigkeit zur Gruppe „Familie“ — diese Ereignisse gehören an das Familienobjekt (§5.7). Eigene Typen des Baums werden zusätzlich geliefert und unverändert durchgereicht (unbekannte Namen werden in Gramps automatisch Custom-Typen).
+
 ### 5.7 `POST /capture` — zentraler Schreibendpunkt
 
 Führt die gesamte Erfassung **in einer einzigen Gramps-Transaktion** aus. Das ist der wichtigste Endpunkt; Einzeloperationen (§5.8) sind nachrangig.
@@ -447,7 +464,7 @@ Suchfeld (Name + ungefähres Jahr) → Trefferliste → gewählte Person erschei
 **Gestaltungsregeln aus dem Prototyp (2026-08-17):** Feste Positionen im Paar — **Mann links, Frau rechts**; die Auswahl wechselt nur den blauen Rahmen, nie die Plätze (auch die Elternpaare bleiben über ihrem jeweiligen Partner). Der Baum hat ein **stabiles Skelett**: fehlende Personen erscheinen als inaktive „Neu"-Boxen (2 Eltern je Seite, Partner, ein Kind-Slot), damit beim Navigieren nichts springt. Boxen haben **feste Breiten** (Paar-Boxen 1,5-fach), Inhalte kompakt: nur Jahreszahl und unterste Ortsebene („* 1745 Unterhausen"), Überlauf mit Ellipse, vollständige Angaben im Tooltip. Eltern innenbündig über dem Paar ausgerichtet (rechte Kante der Mutter = rechte Kante des Bräutigams, gespiegelt für die Braut), Kinderzeile in Breite der Elternzeile mit eigenem Scrollbalken. **Klick irgendwo auf eine Box navigiert**; die Familienauswahl erscheint nur bei mehreren Ehen. Gesamtbreite auf das rechte Panel von MatrikelHelfer ausgelegt.
 
 **Zuordnungsansicht statt Drag & Drop** (Umbau nach Prototyp-Erfahrung, 2026-08-18)
-Die Zuordnung von Zitaten erfolgt über eine Ancestry-inspirierte Verknüpfungsansicht: links die Ereignisliste der Person, rechts Karten für den aktuellen Fund („Neuer Fund“) und alle vorhandenen Zitate der Person (Beschriftung: Quellen-**Abkürzung** + Seite, vollständige Angaben im Tooltip; die Abkürzung wird beim Anlegen fest abgeleitet — „Pfarrei, Buchtyp Von–Bis“ —, eine Konfigurierbarkeit kann später folgen). Klick auf eine Seite zeichnet Verbindungslinien zu den Gegenstücken (durchgezogen = in Gramps vorhanden, gestrichelt = in der Änderungsliste vorgemerkt). **Doppelklick** versetzt ein Element in den Zuordnungsmodus: Klicks auf die Gegenseite schalten Verknüpfungen um und erzeugen bzw. entfernen Änderungslisten-Einträge. Bestehende Gramps-Verknüpfungen sind dabei gesperrt (kein Lösen über die Bridge, §2.2); vorhandene Zitate können jedoch weiteren Ereignissen zugeordnet werden (`POST /citations/{handle}/attach`, §5.8 — erster umgesetzter Einzelendpunkt).
+Die Zuordnung von Zitaten erfolgt über eine Ancestry-inspirierte Verknüpfungsansicht: links die Ereignisliste der Person, rechts Karten für den aktuellen Fund („Neuer Fund“) und alle vorhandenen Zitate der Person (Beschriftung: Quellen-**Abkürzung** + Seite, vollständige Angaben im Tooltip; die Abkürzung wird beim Anlegen fest abgeleitet — „Pfarrei, Buchtyp Von–Bis“ —, eine Konfigurierbarkeit kann später folgen). Klick auf eine Seite zeichnet Verbindungslinien zu den Gegenstücken (durchgezogen = in Gramps vorhanden, gestrichelt = in der Änderungsliste vorgemerkt). **Doppelklick** versetzt ein Element in den Zuordnungsmodus: Klicks auf die Gegenseite schalten Verknüpfungen um und erzeugen bzw. entfernen Änderungslisten-Einträge. Bestehende Gramps-Verknüpfungen sind dabei gesperrt (kein Lösen über die Bridge, §2.2); vorhandene Zitate können jedoch weiteren Ereignissen zugeordnet werden (`POST /citations/{handle}/attach`, §5.8 — erster umgesetzter Einzelendpunkt). *Vorgemerkt für die Umsetzung in der App (nicht mehr im Tester): die Ereignisliste erhält dasselbe Kartendesign wie die Quellenspalte rechts — visuelle Verfeinerung erfolgt generell erst in der App (MahApps-Styling), der Tester bleibt beim Funktionsprototyp.*
 
 **Entscheidung — keine Zitate direkt am Personenobjekt** (2026-08-18)
 Die Verknüpfungsansicht bietet das Personenobjekt nicht als Zuordnungsziel an: Es gibt keinen genealogischen Anwendungsfall, in dem ein Kirchenbucheintrag die Person selbst statt eines ihrer Ereignisse belegt — belegt wird immer ein Faktum. Die Bridge-API behält `person` als Zieltyp (generisch, testabgedeckt), der Client nutzt ihn nicht. Der Permalink im Internet-Reiter der Person (`person_url`, §5.7) ist davon unberührt.

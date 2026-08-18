@@ -364,17 +364,10 @@
                                 <ItemsControl x:Name="FactsList"
                                               ItemsSource="{Binding Facts}"
                                               ItemTemplate="{StaticResource FactRowTemplate}" />
-                                <DockPanel Margin="0,6,0,0">
-                                    <Button DockPanel.Dock="Left" Content="+ Ereignis vormerken"
-                                            Margin="0,0,6,0" Command="{Binding AddEventCommand}"
-                                            ToolTip="Erzeugt einen Eintrag in der Änderungsliste und eine (neu)-Zeile oben — auch die ist ein Zuordnungsziel" />
-                                    <ComboBox Width="130" Margin="0,0,6,0"
-                                              ItemsSource="{Binding EventTypes}"
-                                              SelectedItem="{Binding EventType}" />
-                                    <TextBox Text="{Binding EventDescription, UpdateSourceTrigger=PropertyChanged}"
-                                             VerticalAlignment="Center"
-                                             ToolTip="Beschreibung des neuen Ereignisses" />
-                                </DockPanel>
+                                <Button Content="+ Ereignis vormerken"
+                                        HorizontalAlignment="Left" Margin="0,6,0,0"
+                                        Command="{Binding AddEventCommand}"
+                                        ToolTip="Öffnet die Ereignistyp-Auswahl (Liste aus Gramps, inkl. eigener Typen des Baums); der vorgemerkte Eintrag erscheint als (neu)-Zeile oben und ist selbst Zuordnungsziel" />
                             </StackPanel>
                         </GroupBox>
 
