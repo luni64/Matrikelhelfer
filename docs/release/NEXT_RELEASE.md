@@ -2,7 +2,7 @@
 
 ## Features
 
-- **Hauptfenster mit Reitern**: „Zitate“ (die bisherige Ansicht zum Kopieren der Quellen-/Zitatangaben) und „Gramps“ (der kommende Gramps-Modus; vorerst Platzhalter). Die Aktionsleiste wurde umsortiert — **Lesen und Speichern liegen jetzt nebeneinander** rechts, der Verbinden-Stecker links.
+- **Hauptfenster mit Reitern**: „Zitate“ (die bisherige Ansicht zum Kopieren der Quellen-/Zitatangaben) und „Gramps“ (der kommende Gramps-Modus). Der Gramps-Reiter **verbindet sich beim Öffnen automatisch** mit einer laufenden Gramps-Instanz samt Bridge-Addon und zeigt Version und geöffneten Stammbaum; der Stecker-Button dient zum erneuten Verbinden bzw. Trennen. Die Aktionsleiste wurde umsortiert — **Lesen und Speichern liegen jetzt nebeneinander** rechts, der Verbinden-Stecker links.
 - **Gespeicherte Einträge als Karten-Ablage**: Die Tabellenansicht wurde durch eine vertikale Kartenliste ersetzt (Name fett, Buch, Seite + Speicherdatum; Kommentar als Tooltip; neueste zuerst), die in beiden Reitern rechts angedockt ist und die volle Fensterhöhe nutzt. Jede Karte hat ein ✕ zum Löschen (erscheint beim Überfahren); die Export-Schaltflächen (BibTeX/CSV) und „Alle löschen“ sitzen jetzt in einer Leiste am unteren Kartenrand. Auswahl, Doppelklick (Browser-Navigation), Kontextmenü, Entf-Taste und der Verwerfen-Schutz verhalten sich wie bisher.
 - **Schnelleres Verbinden**: Läuft genau ein Browser (der Normalfall), verbindet der Stecker-Button direkt ohne Auswahldialog; der Dialog erscheint nur noch bei mehreren Browsern, ohne laufenden Browser gibt es einen Hinweis in der Statuszeile.
 

@@ -27,6 +27,11 @@
 	  <Resource Include="Assets\Matrikelhelfer.ico" />
 	</ItemGroup>
 	<ItemGroup>
+	  <!-- The Gramps bridge client (discovery, DTOs, async HTTP) - shared
+	       with the GrampsBridgeTester sandbox. -->
+	  <ProjectReference Include="..\GrampsBridgeClient\GrampsBridgeClient.csproj" />
+	</ItemGroup>
+	<ItemGroup>
 	  <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
 	  <PackageReference Include="MahApps.Metro" Version="2.4.10" />
 	  <PackageReference Include="MahApps.Metro.IconPacks.FontAwesome6" Version="6.2.0" />

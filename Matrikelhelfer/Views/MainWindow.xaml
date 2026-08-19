@@ -131,19 +131,50 @@
                 Background="{DynamicResource MahApps.Brushes.Gray10}"
                 BorderBrush="{DynamicResource MahApps.Brushes.Gray8}"
                 BorderThickness="0,1,0,0" Padding="15,4">
-            <TextBlock Text="{Binding StatusText}" Foreground="Firebrick"
-                       TextTrimming="CharacterEllipsis">
-                <TextBlock.Style>
-                    <Style TargetType="TextBlock">
-                        <Setter Property="ToolTip" Value="{Binding StatusText}" />
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding StatusText}" Value="">
-                                <Setter Property="ToolTip" Value="{x:Null}" />
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </TextBlock.Style>
-            </TextBlock>
+            <DockPanel>
+                <!-- Compact permanent Gramps indicator on the right: plug
+                     color = connection state, short text = tree name, full
+                     status in the tooltip. Clicking toggles the connection
+                     (the tab also auto-connects when opened). Lives here
+                     instead of a card in the Gramps tab - the app must stay
+                     small enough to sit beside the browser. -->
+                <Button DockPanel.Dock="Right" Margin="10,0,0,0" Padding="2,0"
+                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                        Command="{Binding ToggleGrampsConnectionCommand}"
+                        ToolTip="{Binding GrampsStatusText}">
+                    <StackPanel Orientation="Horizontal">
+                        <iconPacks:PackIconFontAwesome6 Kind="PlugSolid" Width="11" Height="11"
+                                                        VerticalAlignment="Center">
+                            <iconPacks:PackIconFontAwesome6.Style>
+                                <Style TargetType="iconPacks:PackIconFontAwesome6">
+                                    <Setter Property="Foreground" Value="Orange" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsGrampsConnected}" Value="True">
+                                            <Setter Property="Foreground" Value="Green" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </iconPacks:PackIconFontAwesome6.Style>
+                        </iconPacks:PackIconFontAwesome6>
+                        <TextBlock Margin="5,0,0,0" VerticalAlignment="Center"
+                                   Text="{Binding GrampsShortStatus}"
+                                   Foreground="{DynamicResource MahApps.Brushes.Gray2}" />
+                    </StackPanel>
+                </Button>
+                <TextBlock Text="{Binding StatusText}" Foreground="Firebrick"
+                           TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="ToolTip" Value="{Binding StatusText}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding StatusText}" Value="">
+                                    <Setter Property="ToolTip" Value="{x:Null}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </DockPanel>
         </Border>
 
         <!-- Transparent (but still hit-testable) drag handle between fields
@@ -412,6 +443,7 @@
              The saved-finds tray to the right sits OUTSIDE the tabs and
              serves both. -->
         <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0"
+                    SelectedIndex="{Binding SelectedTabIndex}"
                     mah:TabControlHelper.Underlined="SelectedTabItem">
         <TabItem x:Name="ZitateTabItem" Header="Zitate"
                  mah:HeaderedControlHelper.HeaderFontSize="16">
@@ -593,8 +625,9 @@
         </ScrollViewer>
         </TabItem>
 
-        <!-- Placeholder until the bridge connection lands (stage 2) and the
-             Gramps-Modus view is ported (stage 3). -->
+        <!-- Placeholder; the Gramps-Modus view (tree, assignment, upload)
+             is ported in stage 3. Opening this tab auto-connects to the
+             bridge; the connection state lives in the status bar. -->
         <TabItem Header="Gramps" mah:HeaderedControlHelper.HeaderFontSize="16">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
                         Opacity="0.55" Margin="20">
@@ -603,7 +636,7 @@
                         Foreground="{DynamicResource MahApps.Brushes.Gray3}" />
                 <TextBlock Margin="0,14,0,0" TextAlignment="Center" TextWrapping="Wrap"
                            MaxWidth="360"
-                           Text="Gramps-Modus: Funde direkt in einen laufenden Gramps-Stammbaum übernehmen — ohne Import/Export. Die Verbindung zur MatrikelHelfer Bridge folgt im nächsten Schritt." />
+                           Text="Gramps-Modus: Funde direkt in einen laufenden Gramps-Stammbaum übernehmen — ohne Import/Export. Der begehbare Stammbaum mit der Zuordnungsansicht folgt im nächsten Schritt." />
             </StackPanel>
         </TabItem>
         </TabControl>

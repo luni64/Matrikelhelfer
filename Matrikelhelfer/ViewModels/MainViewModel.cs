@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using Matrikelhelfer.Models;
@@ -293,6 +294,90 @@ class MainViewModel : INotifyPropertyChanged
         set => SetField(ref _isEntriesPanelOpen, value);
     }
 
+    // ---- Gramps bridge connection (integration stage 2) -------------
+
+    // All bridge traffic goes through this one adapter - the future
+    // multi-backend interface line (see spec §1 and ARCHITECTURE.md).
+    readonly GrampsBackend _gramps = new();
+
+    string _grampsStatusText =
+        "Nicht verbunden – Gramps mit dem MatrikelHelfer-Bridge-Addon starten.";
+    public string GrampsStatusText
+    {
+        get => _grampsStatusText;
+        private set => SetField(ref _grampsStatusText, value);
+    }
+
+    bool _isGrampsConnected;
+    public bool IsGrampsConnected
+    {
+        get => _isGrampsConnected;
+        private set => SetField(ref _isGrampsConnected, value);
+    }
+
+    // Short form for the permanent status-bar indicator; the full
+    // GrampsStatusText is its tooltip.
+    string _grampsShortStatus = "Gramps: nicht verbunden";
+    public string GrampsShortStatus
+    {
+        get => _grampsShortStatus;
+        private set => SetField(ref _grampsShortStatus, value);
+    }
+
+    // Bound to the main TabControl. Opening the Gramps tab tries to
+    // connect automatically (cheap: a file read + one local ping) - the
+    // plug button remains for retry and for explicit disconnect.
+    int _selectedTabIndex;
+    public int SelectedTabIndex
+    {
+        get => _selectedTabIndex;
+        set
+        {
+            if (_selectedTabIndex == value)
+            {
+                return;
+            }
+            SetField(ref _selectedTabIndex, value);
+            if (value == GrampsTabIndex && !_gramps.IsConnected)
+            {
+                _ = ConnectGrampsAsync();
+            }
+        }
+    }
+
+    const int GrampsTabIndex = 1;
+
+    async void ToggleGrampsConnection()
+    {
+        if (_gramps.IsConnected)
+        {
+            _gramps.Disconnect();
+            GrampsStatusText =
+                "Nicht verbunden – Gramps mit dem MatrikelHelfer-Bridge-Addon starten.";
+            RefreshGrampsIndicator();
+            return;
+        }
+        await ConnectGrampsAsync();
+    }
+
+    async Task ConnectGrampsAsync()
+    {
+        var result = await _gramps.ConnectAsync();
+        GrampsStatusText = result.Message;
+        RefreshGrampsIndicator();
+    }
+
+    void RefreshGrampsIndicator()
+    {
+        IsGrampsConnected = _gramps.IsConnected;
+        GrampsShortStatus = !_gramps.IsConnected
+            ? "Gramps: nicht verbunden"
+            : _gramps.TreeOpen
+                ? $"Gramps: {_gramps.TreeName}"
+                : "Gramps: kein Stammbaum";
+        CommandManager.InvalidateRequerySuggested();
+    }
+
     public void NavigateToSelectedEntry()
     {
         if (SelectedSavedEntry != null)
@@ -304,6 +389,7 @@ class MainViewModel : INotifyPropertyChanged
     }
 
     public ICommand ToggleConnectionCommand { get; }
+    public ICommand ToggleGrampsConnectionCommand { get; }
     public ICommand ReadCommand { get; }
     public ICommand SaveCommand { get; }
     public ICommand SaveImageCommand { get; }
@@ -352,6 +438,7 @@ class MainViewModel : INotifyPropertyChanged
         }
 
         ToggleConnectionCommand = new RelayCommand(ToggleConnection);
+        ToggleGrampsConnectionCommand = new RelayCommand(ToggleGrampsConnection);
         ReadCommand = new RelayCommand(ReadCurrentTab, () => _connection.IsConnected);
         // Enabled while there is something to commit: an unbound read (which
         // would create a finding) or a bound one with uncommitted edits.
