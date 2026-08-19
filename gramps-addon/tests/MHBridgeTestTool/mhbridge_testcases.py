@@ -195,6 +195,8 @@ class BridgeApiTests(unittest.TestCase):
         status, body = get("/persons/" + CTX["handles"]["hans"])
         self.assertEqual(status, 200)
         self.assertEqual(body["gender"], "M")
+        self.assertEqual(body["parent_family_handle"],
+                         CTX["handles"]["family"])
         self.assertEqual(len(body["events"]), 1)
         event = body["events"][0]
         self.assertEqual(event["type"], "Baptism")
@@ -611,3 +613,245 @@ class BridgeApiTests(unittest.TestCase):
         self.assertTrue(all(t["label"] for t in types.values()))
         # the group labels mirror the Gramps event editor's structure
         self.assertGreaterEqual(len(body["groups"]), 8)
+
+    # -- create_person in capture (spec 7.3 v2) -----------------------
+
+    def test_170_create_person_as_child_with_event(self):
+        """Person + family link + event + citation in ONE transaction -
+        the sibling-series workflow (new child from a baptism entry)."""
+        payload = capture_payload("req-170", create_person={
+            "given": "Lena", "surname": "Meier", "gender": "F",
+            "child_of_family": CTX["handles"]["family"],
+        }, create_event_if_missing={
+            "person_handle": "@new",
+            "event_type": "Baptism",
+            "date": {"type": "regular", "year": 1783, "month": 2, "day": 2},
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 200, body)
+        person = body["created"]["person"]
+        self.assertFalse(person["was_existing"])
+        self.assertNotIn("family", body["created"])   # joined existing one
+        event_handle = body["created"]["event"]["handle"]
+        citation_handle = body["created"]["citation"]["handle"]
+
+        def check():
+            new_person = db().get_person_from_handle(person["handle"])
+            family = db().get_family_from_handle(CTX["handles"]["family"])
+            children = [ref.ref for ref in family.get_child_ref_list()]
+            event_citations = db().get_event_from_handle(
+                event_handle).get_citation_list()
+            return (new_person.get_gender(),
+                    new_person.get_main_parents_family_handle(),
+                    person["handle"] in children,
+                    event_citations)
+        gender, parent_family, is_child, event_citations = in_main(check)
+        self.assertEqual(parent_family, CTX["handles"]["family"])
+        self.assertTrue(is_child)
+        self.assertEqual(event_citations, [citation_handle])
+
+    def test_171_create_person_as_spouse_with_family_event(self):
+        """New spouse creates a new family; '@new' as family_handle puts
+        the Marriage event on exactly that family."""
+        payload = capture_payload("req-171", create_person={
+            "given": "Eva", "surname": "Huber", "gender": "F",
+            "spouse_of": CTX["handles"]["hans"],
+        }, create_event_if_missing={
+            "family_handle": "@new",
+            "event_type": "Marriage",
+            "date": {"type": "regular", "year": 1805},
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 200, body)
+        person = body["created"]["person"]
+        family = body["created"]["family"]
+        self.assertFalse(family["was_existing"])
+
+        def check():
+            fam = db().get_family_from_handle(family["handle"])
+            events = [ref.ref for ref in fam.get_event_ref_list()]
+            return (fam.get_father_handle(), fam.get_mother_handle(), events)
+        father, mother, events = in_main(check)
+        self.assertEqual(father, CTX["handles"]["hans"])
+        self.assertEqual(mother, person["handle"])
+        self.assertEqual(events, [body["created"]["event"]["handle"]])
+
+    def test_172_create_person_as_parent(self):
+        """New parent of a person without parents: family is created,
+        the person becomes its child."""
+        payload = capture_payload("req-172", create_person={
+            "given": "Josef", "surname": "Meier", "gender": "M",
+            "parent_of": CTX["handles"]["anna"],
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 200, body)
+        person = body["created"]["person"]
+        family = body["created"]["family"]
+
+        def check():
+            fam = db().get_family_from_handle(family["handle"])
+            children = [ref.ref for ref in fam.get_child_ref_list()]
+            anna = db().get_person_from_handle(CTX["handles"]["anna"])
+            return (fam.get_father_handle(), children,
+                    anna.get_main_parents_family_handle())
+        father, children, anna_parents = in_main(check)
+        self.assertEqual(father, person["handle"])
+        self.assertEqual(children, [CTX["handles"]["anna"]])
+        self.assertEqual(anna_parents, family["handle"])
+
+    def test_173_create_person_without_citation(self):
+        """Bare person creation: the citation block may be omitted -
+        nothing is created besides person + family link."""
+        citations_before = in_main(lambda: db().get_number_of_citations())
+        status, body = post("/capture", {
+            "request_id": "req-173",
+            "create_person": {
+                "given": "Max", "surname": "Meier", "gender": "M",
+                "child_of_family": CTX["handles"]["family"],
+            },
+        })
+        self.assertEqual(status, 200, body)
+        self.assertIn("person", body["created"])
+        self.assertNotIn("citation", body["created"])
+        citations_after = in_main(lambda: db().get_number_of_citations())
+        self.assertEqual(citations_before, citations_after)
+
+    def test_174_targets_require_citation(self):
+        status, body = post("/capture", {
+            "request_id": "req-174",
+            "create_person": {
+                "given": "X", "child_of_family": CTX["handles"]["family"],
+            },
+            "targets": [{"type": "event", "handle": CTX["event_080"]}],
+        })
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "INVALID_REQUEST")
+
+    def test_175_at_new_requires_create_person(self):
+        payload = capture_payload("req-175", create_event_if_missing={
+            "person_handle": "@new",
+            "event_type": "Baptism",
+        })
+        status, body = post("/capture", payload)
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "INVALID_REQUEST")
+
+    # -- POST /capture-batch (whole session in ONE transaction) -------
+
+    BATCH_TEMPLATE = {
+        "request_id": "req-180",
+        "persons": [
+            {"tmp": "new:p1", "given": "Berta", "surname": "Gruber",
+             "gender": "F"},
+            {"tmp": "new:p2", "given": "Alois", "surname": "Gruber",
+             "gender": "M"},
+            {"tmp": "new:p3", "given": "Zenzi", "surname": "Meier",
+             "gender": "F"},
+        ],
+        "events": [
+            {"tmp": "evt:e1", "type": "Marriage", "family": "new:f1",
+             "date": {"type": "regular", "year": 1806, "month": 5, "day": 6}},
+            {"tmp": "evt:e2", "type": "Baptism", "person": "new:p1",
+             "date": {"type": "regular", "year": 1784}},
+        ],
+        "citations": [{
+            "repository": CAPTURE_TEMPLATE["repository"],
+            "source": {
+                "match": {"by": "attribute", "key": "MH_SourceKey",
+                          "value": "batch-heiraten-001"},
+                "create_if_missing": {
+                    "title": "Testpfarrei, Heiratsbuch Bd. 1",
+                    "attributes": [{"key": "MH_SourceKey",
+                                    "value": "batch-heiraten-001"}],
+                },
+            },
+            "citation": {"page": "S. 99, Eintrag 1"},
+            "targets": [{"type": "event", "ref": "evt:e1"},
+                        {"type": "event", "ref": "evt:e2"}],
+        }],
+    }
+
+    def batch_payload(self, request_id):
+        payload = json.loads(json.dumps(self.BATCH_TEMPLATE))  # deep copy
+        payload["request_id"] = request_id
+        payload["families"] = [
+            # Berta marries Hans (new family), Alois is Berta's father
+            # (new family), Zenzi joins the SEEDED georg+maria family
+            {"tmp": "new:f1", "father": CTX["handles"]["hans"],
+             "mother": "new:p1"},
+            {"tmp": "new:f2", "father": "new:p2", "children": ["new:p1"]},
+            {"handle": CTX["handles"]["family"], "children": ["new:p3"]},
+        ]
+        return payload
+
+    def test_180_batch_full_chain(self):
+        """Persons -> families -> events -> citations in one call: the
+        virtual-spouse-with-parents chain that deadlocked the per-person
+        upload, expressed with zero client-side ordering logic."""
+        before = in_main(lambda: db().get_number_of_people())
+        status, body = post("/capture-batch", self.batch_payload("req-180"))
+        self.assertEqual(status, 200, body)
+        created = body["created"]
+        self.assertEqual(len(created["persons"]), 3)
+        p1 = created["persons"]["new:p1"]["handle"]
+        f1 = created["families"]["new:f1"]["handle"]
+        f2 = created["families"]["new:f2"]["handle"]
+        e1 = created["events"]["evt:e1"]["handle"]
+        e2 = created["events"]["evt:e2"]["handle"]
+        citation = created["citations"][0]
+        self.assertFalse(citation["source"]["was_existing"])
+        CTX["response_180"] = body
+        CTX["batch_before_people"] = before
+
+        def check():
+            fam1 = db().get_family_from_handle(f1)
+            berta = db().get_person_from_handle(p1)
+            fam2 = db().get_family_from_handle(f2)
+            seeded = db().get_family_from_handle(CTX["handles"]["family"])
+            return (fam1.get_father_handle(), fam1.get_mother_handle(),
+                    [r.ref for r in fam1.get_event_ref_list()],
+                    berta.get_main_parents_family_handle(),
+                    fam2.get_father_handle(),
+                    created["persons"]["new:p3"]["handle"]
+                    in [r.ref for r in seeded.get_child_ref_list()],
+                    db().get_event_from_handle(e1).get_citation_list(),
+                    db().get_event_from_handle(e2).get_citation_list())
+        (father1, mother1, fam1_events, berta_parents, father2,
+         zenzi_is_child, cites1, cites2) = in_main(check)
+        self.assertEqual(father1, CTX["handles"]["hans"])
+        self.assertEqual(mother1, p1)
+        self.assertEqual(fam1_events, [e1])
+        self.assertEqual(berta_parents, f2)
+        self.assertEqual(father2, created["persons"]["new:p2"]["handle"])
+        self.assertTrue(zenzi_is_child)
+        # ONE citation shared by both events
+        self.assertEqual(cites1, [citation["handle"]])
+        self.assertEqual(cites2, [citation["handle"]])
+        after = in_main(lambda: db().get_number_of_people())
+        self.assertEqual(after, before + 3)
+
+    def test_181_batch_single_undo(self):
+        """The entire batch is ONE transaction: a single undo removes
+        all three persons again."""
+        in_main(lambda: db().undo())
+        after = in_main(lambda: db().get_number_of_people())
+        self.assertEqual(after, CTX["batch_before_people"])
+
+    def test_182_batch_bad_ref_rolls_back(self):
+        before = in_main(lambda: (db().get_number_of_people(),
+                                  db().get_number_of_citations()))
+        payload = self.batch_payload("req-182")
+        payload["events"][1]["person"] = "new:missing"
+        status, body = post("/capture-batch", payload)
+        self.assertEqual(status, 404)
+        after = in_main(lambda: (db().get_number_of_people(),
+                                 db().get_number_of_citations()))
+        self.assertEqual(before, after)   # nothing half-written
+
+    def test_183_batch_idempotent_replay(self):
+        before = in_main(lambda: db().get_number_of_people())
+        status, body = post("/capture-batch", self.batch_payload("req-180"))
+        self.assertEqual(status, 200)
+        self.assertEqual(body, CTX["response_180"])  # cached, no re-write
+        after = in_main(lambda: db().get_number_of_people())
+        self.assertEqual(after, before)

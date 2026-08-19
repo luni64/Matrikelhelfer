@@ -36,6 +36,7 @@ from gi.repository import GLib
 from gramps.gen.const import USER_DATA, VERSION as GRAMPS_VERSION
 from gramps.gen.errors import HandleError
 
+from mhbridge_batch import do_capture_batch
 from mhbridge_capture import InvalidPayload, do_attach, do_capture
 from mhbridge_events import event_type_catalog
 from mhbridge_persons import (DEFAULT_LIMIT, MAX_LIMIT, PersonIndex,
@@ -43,7 +44,7 @@ from mhbridge_persons import (DEFAULT_LIMIT, MAX_LIMIT, PersonIndex,
 from mhbridge_sources import search_repositories, search_sources
 
 API_VERSION = 1
-ADDON_VERSION = "0.10.0"
+ADDON_VERSION = "0.13.0"
 API_PREFIX = "/api/v1"
 DEFAULT_PORT = 8791
 PORT_SEARCH_RANGE = 20          # FA-2: try DEFAULT_PORT .. +19
@@ -221,6 +222,19 @@ class BridgeService:
             return self._idempotency[request_id]
         db = self._open_db()
         response, created_count = do_capture(db, payload)
+        self.objects_created += created_count
+        if request_id:
+            self._idempotency[request_id] = response
+        return response
+
+    def capture_batch(self, payload):
+        request_id = payload.get("request_id")
+        if request_id and request_id in self._idempotency:
+            LOG.info("capture-batch: request_id %s replayed from cache",
+                     request_id)
+            return self._idempotency[request_id]
+        db = self._open_db()
+        response, created_count = do_capture_batch(db, payload)
         self.objects_created += created_count
         if request_id:
             self._idempotency[request_id] = response
@@ -481,6 +495,12 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 payload = self._json_body()
                 self._respond(200, run_in_main(
                     lambda: service.capture(payload)))
+                return
+
+            if self.command == "POST" and path == API_PREFIX + "/capture-batch":
+                payload = self._json_body()
+                self._respond(200, run_in_main(
+                    lambda: service.capture_batch(payload)))
                 return
 
             citations_prefix = API_PREFIX + "/citations/"

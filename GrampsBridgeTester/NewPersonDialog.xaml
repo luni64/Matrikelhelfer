@@ -1,0 +1,30 @@
+<Window x:Class="GrampsBridgeTester.NewPersonDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Neue Person"
+        Width="340" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        WindowStyle="ToolWindow">
+    <StackPanel Margin="12">
+        <TextBlock x:Name="ContextLine" FontWeight="SemiBold" Margin="0,0,0,8"
+                   TextWrapping="Wrap" />
+        <Label Content="Vorname:" Padding="0,0,0,2" />
+        <TextBox x:Name="GivenBox" VerticalContentAlignment="Center"
+                 Margin="0,0,0,6" TextChanged="Name_TextChanged" />
+        <Label Content="Nachname:" Padding="0,0,0,2" />
+        <TextBox x:Name="SurnameBox" VerticalContentAlignment="Center"
+                 Margin="0,0,0,6" TextChanged="Name_TextChanged" />
+        <Label Content="Geschlecht:" Padding="0,0,0,2" />
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+            <RadioButton x:Name="MaleRadio" Content="männlich" Margin="0,0,12,0" />
+            <RadioButton x:Name="FemaleRadio" Content="weiblich" Margin="0,0,12,0" />
+            <RadioButton x:Name="UnknownRadio" Content="unbekannt" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="SaveButton" Content="Speichern" IsDefault="True"
+                    IsEnabled="False" Padding="14,4" Margin="0,0,8,0"
+                    Click="Save_Click" />
+            <Button Content="Abbrechen" IsCancel="True" Padding="14,4" />
+        </StackPanel>
+    </StackPanel>
+</Window>

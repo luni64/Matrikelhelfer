@@ -7,18 +7,22 @@ namespace GrampsBridgeTester;
 
 /// <summary>
 /// Prototype of the "Gramps-Modus" view (spec 7.3): search, walkable
-/// mini-tree, an Ancestry-style event↔source link view (click draws
-/// connector lines, double-click enters assign mode) and a change list
-/// ("Änderungsliste") — every user action (assign a citation, add an
-/// event) is recorded as a deletable entry; upload executes the list
-/// with dependency ordering and shared-citation coalescing, then reads
-/// the displayed slice back in place.
+/// mini-tree over a local person/family graph (TreeGraph — loaded and
+/// newly created persons are the same kind of node), an Ancestry-style
+/// event↔source link view (click draws connector lines, double-click
+/// enters assign mode) and a change list ("Änderungsliste") — every
+/// user action is recorded as a deletable entry; upload executes the
+/// list with dependency ordering and shared-citation coalescing, then
+/// reads the displayed slice back in place.
 /// </summary>
 public sealed class MainViewModel : ObservableObject
 {
     private BridgeClient? _client;
     private bool _suppressFamilyReload;
-    private List<PersonEvent> _serverEvents = [];
+
+    private readonly TreeGraph _graph = new();
+    private TreePerson? _centerNode;
+    private string? _lastRealCenterId;   // fallback when a virtual center is deleted
 
     public MainViewModel()
     {
@@ -29,10 +33,8 @@ public sealed class MainViewModel : ObservableObject
         SendCommand = new RelayCommand(async void () => await SendAllAsync(),
             () => _client is not null && Changes.Count > 0);
         AddEventCommand = new RelayCommand(OpenAddEventDialog,
-            () => Center is not null && EventTypeChoices.Count > 0);
-        NavigateCommand = new RelayCommand<PersonBoxVM>(
-            async void (box) => await LoadCenterAsync(box.Handle),
-            box => !box.IsPlaceholder);
+            () => _centerNode is not null && EventTypeChoices.Count > 0);
+        NavigateCommand = new RelayCommand<PersonBoxVM>(BoxClicked);
         SelectFactCommand = new RelayCommand<FactRowVM>(FactClicked);
         SelectCardCommand = new RelayCommand<SourceCardVM>(CardClicked);
         AssignFactCommand = new RelayCommand<FactRowVM>(FactDoubleClicked);
@@ -145,7 +147,7 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    // ---- walkable tree ----------------------------------------------
+    // ---- walkable tree (over the graph) ------------------------------
 
     private PersonBoxVM? _center;
     public PersonBoxVM? Center { get => _center; set => Set(ref _center, value); }
@@ -163,57 +165,49 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<PersonBoxVM> RightParentsRow { get; } = [];
     public ObservableCollection<PersonBoxVM> ChildrenRow { get; } = [];
     public ObservableCollection<FactRowVM> Facts { get; } = [];
-    public ObservableCollection<FamilyInfo> Families { get; } = [];
+    public ObservableCollection<TreeFamilyChoice> Families { get; } = [];
 
     public bool HasMultipleFamilies => Families.Count > 1;
 
-    private List<PersonBrief> _centerParents = [];
-    private string _centerGender = "U";
-
-    private FamilyInfo? _selectedFamily;
-    public FamilyInfo? SelectedFamily
+    private TreeFamilyChoice? _selectedFamily;
+    public TreeFamilyChoice? SelectedFamily
     {
         get => _selectedFamily;
         set
         {
             if (Set(ref _selectedFamily, value) && !_suppressFamilyReload)
-                _ = UpdateFamilyDependentAsync();
+                _ = OnFamilyChangedAsync();
         }
     }
 
     public ICommand NavigateCommand { get; }
 
-    private async Task LoadCenterAsync(string handle)
+    /// <summary>Centers on any node — a Gramps person (fetch + upsert)
+    /// or a virtual one (already fully present in the graph). Same
+    /// gesture, same code path.</summary>
+    private async Task LoadCenterAsync(string id)
     {
-        if (_client is null)
-            return;
         try
         {
-            var detail = await _client.GetPersonAsync(handle);
-
-            if (Center?.Handle != handle)
-                Center = new PersonBoxVM(handle) { IsCenter = true, IsLarge = true };
-            Center.UpdateFrom(new PersonBrief(handle, detail.GrampsId,
-                detail.PrimaryName, detail.Gender, detail.Birth, detail.Death));
-
-            _centerParents = detail.Parents;
-            _centerGender = detail.Gender;
-            _serverEvents = detail.Events;
-            SyncFacts();
-
-            _suppressFamilyReload = true;
-            var keepHandle = SelectedFamily?.Handle;
-            Families.Clear();
-            foreach (var family in detail.Families)
-                Families.Add(family);
-            SelectedFamily = Families.FirstOrDefault(f => f.Handle == keepHandle)
-                             ?? Families.FirstOrDefault();
-            _suppressFamilyReload = false;
-            OnChanged(nameof(HasMultipleFamilies));
-            await UpdateFamilyDependentAsync();
-
-            RecomputeBadges();
-            RefreshLinkView();
+            TreePerson? node;
+            if (id.StartsWith("new:", StringComparison.Ordinal))
+            {
+                node = _graph.Person(id);
+                if (node is null)
+                    return;
+            }
+            else
+            {
+                if (_client is null)
+                    return;
+                var detail = await _client.GetPersonAsync(id);
+                node = _graph.UpsertDetail(detail);
+                _lastRealCenterId = id;
+            }
+            _centerNode = node;
+            RebuildFamilyCombo();
+            await EnsurePartnerDetailAsync();
+            RebuildAll();
         }
         catch (Exception ex)
         {
@@ -221,111 +215,181 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private async Task UpdateFamilyDependentAsync()
+    /// <summary>The displayed partner's parents live one detail call
+    /// away — fetch once, the graph keeps it.</summary>
+    private async Task EnsurePartnerDetailAsync()
     {
-        var spouseBrief = SelectedFamily?.Spouse;
-        var spouseGender = "U";
-        var spouseParents = new List<PersonBrief>();
-        if (spouseBrief is null)
+        var partner = _centerNode is null
+            ? null : SelectedFamily?.Family.PartnerOf(_centerNode);
+        if (partner is { IsVirtual: false, DetailLoaded: false }
+            && _client is not null)
         {
-            if (Spouse is null || !Spouse.IsPlaceholder)
-                Spouse = PersonBoxVM.Placeholder(large: true);
-        }
-        else
-        {
-            if (Spouse?.Handle != spouseBrief.Handle)
-                Spouse = new PersonBoxVM(spouseBrief.Handle) { IsLarge = true };
-            Spouse.UpdateFrom(spouseBrief);
-            spouseGender = spouseBrief.Gender ?? "U";
             try
             {
-                // spouse's parents live one detail call away
-                var spouseDetail = await _client!.GetPersonAsync(spouseBrief.Handle);
-                Spouse.UpdateFrom(new PersonBrief(spouseBrief.Handle,
-                    spouseDetail.GrampsId, spouseDetail.PrimaryName,
-                    spouseDetail.Gender, spouseDetail.Birth, spouseDetail.Death));
-                spouseGender = spouseDetail.Gender;
-                spouseParents = spouseDetail.Parents;
+                _graph.UpsertDetail(await _client.GetPersonAsync(partner.Id));
             }
             catch (Exception)
             {
                 // brief data is good enough for the box
             }
         }
+    }
 
-        // man left, woman right; the selected person is only marked blue
-        var centerLeft = _centerGender switch
-        {
-            "M" => true,
-            "F" => false,
-            _ => spouseGender != "M",
-        };
-        LeftBox = centerLeft ? Center : Spouse;
-        RightBox = centerLeft ? Spouse : Center;
-        SyncRow(LeftParentsRow,
-                PadCouple(centerLeft ? _centerParents : spouseParents));
-        SyncRow(RightParentsRow,
-                PadCouple(centerLeft ? spouseParents : _centerParents));
+    private async Task OnFamilyChangedAsync()
+    {
+        await EnsurePartnerDetailAsync();
+        RebuildAll();
+    }
 
-        // children plus one trailing "Neu" slot, like the concept sketch
-        var children = (SelectedFamily?.Children ?? [])
-            .Cast<PersonBrief?>().Append(null).ToList();
-        SyncRow(ChildrenRow, children);
+    private void RebuildFamilyCombo()
+    {
+        _suppressFamilyReload = true;
+        var keep = SelectedFamily?.Family;
+        Families.Clear();
+        if (_centerNode is not null)
+            foreach (var family in _centerNode.Families)
+                Families.Add(new TreeFamilyChoice(
+                    family, FamilyDisplay(_centerNode, family)));
+        SelectedFamily = Families.FirstOrDefault(c => c.Family == keep)
+                         ?? Families.FirstOrDefault();
+        _suppressFamilyReload = false;
+        OnChanged(nameof(HasMultipleFamilies));
+    }
+
+    private static string FamilyDisplay(TreePerson center, TreeFamily family)
+    {
+        var partner = family.PartnerOf(center);
+        return (partner is null ? "(ohne Partner)" : "mit " + partner.DisplayName)
+            + $", {family.Children.Count} Kind(er)"
+            + (family.IsVirtual ? " (neu)" : "");
+    }
+
+    private void RebuildAll()
+    {
+        RebuildRows();
         SyncFacts();
         RecomputeBadges();
         RefreshLinkView();
     }
 
-    /// <summary>Always two slots per parent couple; missing -> "Neu".</summary>
-    private static List<PersonBrief?> PadCouple(IReadOnlyList<PersonBrief> briefs) =>
-        [briefs.ElementAtOrDefault(0), briefs.ElementAtOrDefault(1)];
+    /// <summary>Layout straight from the graph: couple (man left, woman
+    /// right), each side's parent family above, the selected family's
+    /// children below. Virtual nodes render like real ones.</summary>
+    private void RebuildRows()
+    {
+        if (_centerNode is null)
+            return;
+        var center = _centerNode;
+        var family = SelectedFamily?.Family;
+        var partner = family?.PartnerOf(center);
+
+        if (Center?.Handle != center.Id)
+            Center = new PersonBoxVM(center.Id) { IsCenter = true, IsLarge = true };
+        Center.UpdateFromNode(center);
+
+        if (partner is not null)
+        {
+            if (Spouse?.Handle != partner.Id)
+                Spouse = new PersonBoxVM(partner.Id) { IsLarge = true };
+            Spouse.UpdateFromNode(partner);
+        }
+        else if (Spouse is null || !Spouse.IsPlaceholder)
+        {
+            Spouse = PersonBoxVM.Placeholder(large: true);
+        }
+
+        var centerLeft = center.Gender switch
+        {
+            "M" => true,
+            "F" => false,
+            _ => (partner?.Gender ?? "U") != "M",
+        };
+        LeftBox = centerLeft ? Center : Spouse;
+        RightBox = centerLeft ? Spouse : Center;
+        SyncRow(LeftParentsRow, ParentSpecs(centerLeft ? center : partner));
+        SyncRow(RightParentsRow, ParentSpecs(centerLeft ? partner : center));
+
+        var childSpecs = new List<BoxSpec>();
+        foreach (var child in family?.Children ?? [])
+            childSpecs.Add(NodeSpec(child));
+        childSpecs.Add(BoxSpec.NewSlot);
+        SyncRow(ChildrenRow, childSpecs);
+    }
+
+    /// <summary>Two slots above each partner: father left, mother right,
+    /// empty slot = "Neu".</summary>
+    private static List<BoxSpec> ParentSpecs(TreePerson? person)
+    {
+        var parentFamily = person?.ParentFamily;
+        return
+        [
+            parentFamily?.Father is { } father ? NodeSpec(father) : BoxSpec.NewSlot,
+            parentFamily?.Mother is { } mother ? NodeSpec(mother) : BoxSpec.NewSlot,
+        ];
+    }
+
+    private sealed record BoxSpec(string Key, Action<PersonBoxVM>? Update)
+    {
+        public static readonly BoxSpec NewSlot = new("", null);
+    }
+
+    private static BoxSpec NodeSpec(TreePerson node) =>
+        new(node.Id, box => box.UpdateFromNode(node));
 
     /// <summary>In-place row sync (spec 7.3: identical sets keep their
-    /// boxes, so a post-upload refresh never moves the view). A null
-    /// brief means a "Neu" placeholder slot.</summary>
+    /// boxes, so a post-upload refresh never moves the view). An empty
+    /// key means a "Neu" placeholder slot.</summary>
     private static void SyncRow(ObservableCollection<PersonBoxVM> row,
-                                IReadOnlyList<PersonBrief?> briefs)
+                                IReadOnlyList<BoxSpec> specs)
     {
-        var same = row.Count == briefs.Count && row.Zip(briefs).All(pair =>
-            pair.Second is null ? pair.First.IsPlaceholder
-                                : pair.First.Handle == pair.Second.Handle);
+        var same = row.Count == specs.Count && row.Zip(specs).All(pair =>
+            pair.Second.Key.Length == 0 ? pair.First.IsPlaceholder
+                                        : pair.First.Handle == pair.Second.Key);
         if (same)
         {
-            foreach (var (box, brief) in row.Zip(briefs))
-                if (brief is not null)
-                    box.UpdateFrom(brief);
+            foreach (var (box, spec) in row.Zip(specs))
+                spec.Update?.Invoke(box);
             return;
         }
         row.Clear();
-        foreach (var brief in briefs)
+        foreach (var spec in specs)
         {
-            if (brief is null)
+            if (spec.Key.Length == 0)
             {
                 row.Add(PersonBoxVM.Placeholder());
                 continue;
             }
-            var box = new PersonBoxVM(brief.Handle);
-            box.UpdateFrom(brief);
+            var box = new PersonBoxVM(spec.Key);
+            spec.Update?.Invoke(box);
             row.Add(box);
         }
     }
 
-    /// <summary>Facts = server events of the center person + pending
-    /// create-event entries whose owner is currently displayed. Pending
-    /// rows are keyed by their change-entry id, so they transform into
-    /// the real row in place once the upload read-back delivers it.</summary>
+    /// <summary>Facts of the center: its Gramps events plus pending
+    /// create-event entries; a virtual center has pending events only.
+    /// Pending rows are keyed by their change-entry id, so they turn
+    /// into the real row in place after the upload read-back.</summary>
     private void SyncFacts()
     {
         var desired = new List<(string Key, Action<FactRowVM> Update)>();
-        foreach (var evt in _serverEvents)
-            desired.Add((evt.Handle, row => row.UpdateFrom(evt)));
-        foreach (var entry in Changes.Where(c => c.Kind == ChangeKind.CreateEvent))
+        if (_centerNode is { } center)
         {
-            var visible = entry.OwnerKind == "person"
-                ? entry.OwnerHandle == Center?.Handle
-                : entry.OwnerHandle == SelectedFamily?.Handle;
-            if (visible)
-                desired.Add((entry.Id, row => row.UpdateFromPending(entry)));
+            foreach (var evt in center.Events)
+                desired.Add((evt.Handle, row => row.UpdateFrom(evt)));
+            foreach (var entry in Changes.Where(c => c.Kind == ChangeKind.CreateEvent))
+            {
+                var visible = entry.OwnerKind switch
+                {
+                    "person" => entry.OwnerHandle == center.Id,
+                    "pending-person" => center.IsVirtual
+                                        && entry.OwnerHandle == center.EntryId,
+                    "family" or "pending-family" =>
+                        entry.OwnerHandle == SelectedFamily?.Family.Id,
+                    _ => false,
+                };
+                if (visible)
+                    desired.Add((entry.Id, row => row.UpdateFromPending(entry)));
+            }
         }
 
         var same = Facts.Count == desired.Count && Facts.Zip(desired)
@@ -351,6 +415,135 @@ public sealed class MainViewModel : ObservableObject
             [Center, Spouse, .. LeftParentsRow, .. RightParentsRow, .. ChildrenRow];
         return boxes.Where(b => b is { IsPlaceholder: false })!;
     }
+
+    // ---- virtual persons (spec 7.3 v2: click a "Neu" box) ------------
+
+    /// <summary>Any person box navigates — real ones fetch, virtual
+    /// ones are already in the graph. "Neu" slots create a person.</summary>
+    private async void BoxClicked(PersonBoxVM box)
+    {
+        if (box.IsPlaceholder)
+        {
+            OpenNewPersonDialog(box);
+            return;
+        }
+        await LoadCenterAsync(box.Handle);
+    }
+
+    private void OpenNewPersonDialog(PersonBoxVM box)
+    {
+        if (_centerNode is null)
+            return;
+        var center = _centerNode;
+        var family = SelectedFamily?.Family;
+        var partner = family?.PartnerOf(center);
+
+        string context, gender, roleLabel;
+        var surname = "";
+        Action<TreePerson> wire;
+
+        if (ReferenceEquals(box, Spouse))
+        {
+            gender = center.Gender == "M" ? "F"
+                : center.Gender == "F" ? "M" : "U";
+            context = "Neuer Partner von " + center.DisplayName;
+            roleLabel = "Partner";
+            wire = person =>
+            {
+                // join the partner-less selected family, else found one
+                var target = family ?? _graph.AddVirtualFamily();
+                TreeGraph.PlacePartner(target, center);
+                TreeGraph.PlacePartner(target, person);
+                if (!center.Families.Contains(target))
+                    center.Families.Add(target);
+                person.Families.Add(target);
+            };
+        }
+        else if (LeftParentsRow.Contains(box) || RightParentsRow.Contains(box))
+        {
+            var left = LeftParentsRow.Contains(box);
+            var sideBox = left ? LeftBox : RightBox;
+            var side = sideBox is { IsPlaceholder: false }
+                ? _graph.Person(sideBox.Handle) : null;
+            if (side is null)
+            {
+                QueueStatus = "Für diesen Platz zuerst die Person darunter anlegen";
+                return;
+            }
+            gender = (left ? LeftParentsRow : RightParentsRow).IndexOf(box) == 0
+                ? "M" : "F";
+            surname = gender == "M" ? SurnameOf(side) : "";
+            context = (gender == "M" ? "Neuer Vater von " : "Neue Mutter von ")
+                + side.DisplayName;
+            roleLabel = gender == "M" ? "Vater" : "Mutter";
+            wire = person =>
+            {
+                var target = side.ParentFamily;
+                if (target is null)
+                {
+                    target = _graph.AddVirtualFamily();
+                    target.Children.Add(side);
+                    side.ParentFamily = target;
+                }
+                TreeGraph.PlacePartner(target, person);
+                person.Families.Add(target);
+            };
+        }
+        else if (ChildrenRow.Contains(box))
+        {
+            gender = "U";
+            var father = family?.Father
+                ?? (center.Gender == "M" ? center
+                    : partner?.Gender == "M" ? partner : null);
+            surname = father is null ? "" : SurnameOf(father);
+            context = "Neues Kind von " + center.DisplayName
+                + (partner is not null ? " ⚭ " + partner.DisplayName : "");
+            roleLabel = "Kind";
+            wire = person =>
+            {
+                var target = family ?? _graph.AddVirtualFamily();
+                TreeGraph.PlacePartner(target, center);
+                if (!center.Families.Contains(target))
+                    center.Families.Add(target);
+                target.Children.Add(person);
+                person.ParentFamily = target;
+            };
+        }
+        else
+        {
+            return;
+        }
+
+        var dialog = new NewPersonDialog(context, "", surname, gender)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        if (dialog.ShowDialog() != true)
+            return;
+        var id = Guid.NewGuid().ToString("N");
+        var node = _graph.AddVirtualPerson(id, dialog.Given, dialog.Surname,
+                                           dialog.Gender);
+        wire(node);
+        Changes.Add(new ChangeEntry
+        {
+            Id = id,
+            Kind = ChangeKind.CreatePerson,
+            EntityKey = id,      // the new person is its own change-tree root
+            EntityLabel = "Neu: " + node.DisplayName,
+            NewGiven = dialog.Given,
+            NewSurname = dialog.Surname,
+            NewGender = dialog.Gender,
+            RoleLabel = roleLabel,
+        });
+        AfterChangesMutation(
+            $"Änderung erfasst: neue Person {node.DisplayName}");
+    }
+
+    private static string SurnameOf(TreePerson person) =>
+        person.IsVirtual ? person.Surname
+        : person.DisplayName.Contains(' ')
+            ? person.DisplayName[(person.DisplayName.LastIndexOf(' ') + 1)..]
+            : "";
 
     // ---- event <-> source link view (Ancestry-style) -----------------
     //
@@ -879,16 +1072,23 @@ public sealed class MainViewModel : ObservableObject
 
     private void OpenAddEventDialog()
     {
-        if (Center is null || EventTypeChoices.Count == 0)
+        if (_centerNode is null || EventTypeChoices.Count == 0)
             return;
-        var dialog = new EventTypeDialog(EventTypeChoices, _lastEventType)
+        // prefill = the open record's date (right for the primary event,
+        // a Taufe from the Taufbuch); freely editable incl. qualifiers
+        // for derived mentions ("Mutter bereits verstorben" -> vor 1757)
+        var dialog = new EventTypeDialog(EventTypeChoices, _lastEventType,
+                                         CitationDate)
         {
             Owner = System.Windows.Application.Current.MainWindow,
         };
         if (dialog.ShowDialog() != true || dialog.SelectedType is not { } choice)
             return;
         _lastEventType = choice;
-        AddPendingEvent(choice, dialog.Description);
+        var date = ParseDate(dialog.DateText);
+        if (date is not null)
+            date.Type = dialog.DateType;
+        AddPendingEvent(choice, dialog.Description, date, dialog.DateDisplay);
     }
 
     public ICommand AddEventCommand { get; }
@@ -905,43 +1105,87 @@ public sealed class MainViewModel : ObservableObject
     public ICommand DeleteEntryCommand { get; }
     public ICommand DeleteGroupCommand { get; }
 
-    /// <summary>"+ Ereignis vormerken": record a create-event change; a
-    /// pending row appears in the facts list and is itself a drop target.</summary>
-    private void AddPendingEvent(EventTypeChoice eventType, string description)
+    /// <summary>"+ Ereignis vormerken" for whatever person is centered.
+    /// Virtual centers get pending-person events (uploaded together
+    /// with their create_person capture); family events on a virtual
+    /// family become pending-family events that run once the family
+    /// has materialized.</summary>
+    private void AddPendingEvent(EventTypeChoice eventType, string description,
+                                 DateSpec? eventDate, string eventDateText)
     {
-        if (Center is null)
+        if (_centerNode is null)
             return;
-        var find = SnapshotFind();
-        string ownerKind, ownerHandle, entityLabel;
+        var center = _centerNode;
+
         if (eventType.IsFamily)
         {
-            if (SelectedFamily is null)
+            var family = SelectedFamily?.Family;
+            if (family is null)
             {
                 QueueStatus = $"{eventType.Label} ist ein Familienereignis — "
                               + "keine Familie vorhanden";
                 return;
             }
-            ownerKind = "family";
-            ownerHandle = SelectedFamily.Handle;
-            entityLabel = "Familie: " + Center.Name
-                + (SelectedFamily.Spouse?.PrimaryName is { } spouse ? " ⚭ " + spouse : "");
+            var entityLabel = "Familie: " + center.DisplayName
+                + (family.PartnerOf(center) is { } partner
+                   ? " ⚭ " + partner.DisplayName : "")
+                + (family.IsVirtual ? " (neu)" : "");
+            Changes.Add(new ChangeEntry
+            {
+                Kind = ChangeKind.CreateEvent,
+                Find = SnapshotFind(),
+                EntityKey = family.Id,
+                EntityLabel = entityLabel,
+                EventType = eventType.Xml,
+                EventTypeLabel = eventType.Label,
+                EventDate = eventDate,
+                EventDateText = eventDateText,
+                OwnerKind = family.IsVirtual ? "pending-family" : "family",
+                OwnerHandle = family.Id,
+                EventDescription = NullIfEmpty(description),
+            });
+            AfterChangesMutation(
+                $"Änderung erfasst: {eventType.Label} ({entityLabel})");
+            return;
         }
-        else
+
+        if (center.IsVirtual)
         {
-            ownerKind = "person";
-            ownerHandle = Center.Handle;
-            entityLabel = Center.Name;
+            if (Changes.FirstOrDefault(c => c.Id == center.EntryId)
+                    is not { } personEntry)
+                return;
+            Changes.Add(new ChangeEntry
+            {
+                Kind = ChangeKind.CreateEvent,
+                Find = SnapshotFind(),
+                EntityKey = personEntry.Id,
+                EntityLabel = personEntry.EntityLabel,
+                DependsOnId = personEntry.Id,
+                EventType = eventType.Xml,
+                EventTypeLabel = eventType.Label,
+                EventDate = eventDate,
+                EventDateText = eventDateText,
+                OwnerKind = "pending-person",
+                OwnerHandle = personEntry.Id,
+                EventDescription = NullIfEmpty(description),
+            });
+            AfterChangesMutation(
+                $"Änderung erfasst: {eventType.Label} für {personEntry.EntityLabel}");
+            return;
         }
+
         Changes.Add(new ChangeEntry
         {
             Kind = ChangeKind.CreateEvent,
-            Find = find,
-            EntityKey = ownerHandle,
-            EntityLabel = entityLabel,
+            Find = SnapshotFind(),
+            EntityKey = center.Id,
+            EntityLabel = center.DisplayName,
             EventType = eventType.Xml,
             EventTypeLabel = eventType.Label,
-            OwnerKind = ownerKind,
-            OwnerHandle = ownerHandle,
+            EventDate = eventDate,
+            EventDateText = eventDateText,
+            OwnerKind = "person",
+            OwnerHandle = center.Id,
             EventDescription = NullIfEmpty(description),
         });
         AfterChangesMutation($"Änderung erfasst: neues Ereignis {eventType.Label}");
@@ -949,14 +1193,20 @@ public sealed class MainViewModel : ObservableObject
 
     private (string Key, string Label) FactEntity(FactRowVM fact)
     {
+        // pending rows group under their own entity (e.g. the virtual
+        // person's root in the change tree), not under the center
+        if (fact.IsPendingNew
+            && Changes.FirstOrDefault(c => c.Id == fact.Handle) is { } pending)
+            return (pending.EntityKey, pending.EntityLabel);
         if (fact.Scope == "family" && fact.FamilyHandle is { } familyHandle)
         {
-            var family = Families.FirstOrDefault(f => f.Handle == familyHandle);
-            var label = "Familie: " + (Center?.Name ?? "?")
-                + (family?.Spouse?.PrimaryName is { } spouse ? " ⚭ " + spouse : "");
+            var partner = _centerNode is not null
+                ? _graph.Family(familyHandle)?.PartnerOf(_centerNode) : null;
+            var label = "Familie: " + (_centerNode?.DisplayName ?? "?")
+                + (partner is not null ? " ⚭ " + partner.DisplayName : "");
             return (familyHandle, label);
         }
-        return (Center?.Handle ?? "?", Center?.Name ?? "?");
+        return (_centerNode?.Id ?? "?", _centerNode?.DisplayName ?? "?");
     }
 
     private void DeleteEntry(ChangeEntry entry)
@@ -971,8 +1221,7 @@ public sealed class MainViewModel : ObservableObject
             if (answer != System.Windows.MessageBoxResult.Yes)
                 return;
         }
-        foreach (var item in doomed)
-            Changes.Remove(item);
+        RemoveEntriesAndNodes(doomed);
         AfterChangesMutation($"{doomed.Count} Änderung(en) entfernt");
     }
 
@@ -985,9 +1234,46 @@ public sealed class MainViewModel : ObservableObject
             System.Windows.MessageBoxImage.Question);
         if (answer != System.Windows.MessageBoxResult.Yes)
             return;
-        foreach (var item in doomed)
-            Changes.Remove(item);
+        RemoveEntriesAndNodes(doomed);
         AfterChangesMutation($"{doomed.Count} Änderung(en) entfernt");
+    }
+
+    /// <summary>Removes the entries and, for create-person entries,
+    /// their nodes from the graph. Pruning may orphan further virtual
+    /// persons (children of a deleted virtual couple) — their entries
+    /// go too. A deleted virtual center falls back to the last real
+    /// person.</summary>
+    private void RemoveEntriesAndNodes(List<ChangeEntry> doomed)
+    {
+        var queue = new Queue<ChangeEntry>(doomed);
+        while (queue.Count > 0)
+        {
+            var entry = queue.Dequeue();
+            Changes.Remove(entry);
+            if (entry.Kind != ChangeKind.CreatePerson
+                || _graph.Person("new:" + entry.Id) is not { } node)
+                continue;
+            foreach (var orphan in _graph.RemoveVirtualPerson(node))
+                if (Changes.FirstOrDefault(c => c.Id == orphan.EntryId)
+                        is { } orphanEntry)
+                    foreach (var dependent in CollectWithDependents(orphanEntry))
+                        queue.Enqueue(dependent);
+        }
+        // family events whose (virtual) family vanished with the pruning
+        foreach (var stale in Changes.Where(c =>
+                     c is { Kind: ChangeKind.CreateEvent,
+                            OwnerKind: "pending-family" }
+                     && _graph.Family(c.OwnerHandle) is null).ToList())
+            foreach (var dependent in CollectWithDependents(stale))
+                Changes.Remove(dependent);
+
+        if (_centerNode is { IsVirtual: true } center
+            && _graph.Person(center.Id) is null)
+        {
+            _centerNode = null;
+            if (_lastRealCenterId is { } real)
+                _ = LoadCenterAsync(real);
+        }
     }
 
     private List<ChangeEntry> CollectWithDependents(ChangeEntry root)
@@ -1001,6 +1287,8 @@ public sealed class MainViewModel : ObservableObject
 
     private void AfterChangesMutation(string status)
     {
+        RebuildFamilyCombo();
+        RebuildRows();
         SyncFacts();
         RecomputeBadges();
         RebuildChangeTree();
@@ -1038,255 +1326,302 @@ public sealed class MainViewModel : ObservableObject
                 c.Kind is ChangeKind.AttachCitation or ChangeKind.AttachExisting
                 && c.TargetHandle == fact.Handle);
         foreach (var box in AllBoxes())
-            box.PendingCount = Changes.Count(c =>
-                c.Kind == ChangeKind.CreateEvent
-                && c.OwnerKind == "person" && c.OwnerHandle == box.Handle);
+            box.PendingCount = box.IsVirtual
+                ? Changes.Count(c =>
+                    c.Kind == ChangeKind.CreateEvent
+                    && c.OwnerKind == "pending-person"
+                    && "new:" + c.OwnerHandle == box.Handle)
+                : Changes.Count(c =>
+                    c.Kind == ChangeKind.CreateEvent
+                    && c.OwnerKind == "person" && c.OwnerHandle == box.Handle);
     }
 
-    // ---- upload ------------------------------------------------------
+    // ---- upload (one capture-batch = ONE transaction) ----------------
 
-    private CaptureRequest BuildRequest(FindSnapshot find, List<TargetRef> targets,
-                                        ChangeEntry? createEvent)
+    private static RepositoryBlock RepoBlock(FindSnapshot find) => new()
     {
-        var date = ParseDate(find.DateText);
-        var request = new CaptureRequest
+        Match = new MatchSpec { By = "name", Value = find.RepoName },
+        CreateIfMissing = new RepositoryCreate
         {
-            RequestId = Guid.NewGuid().ToString(),
-            Repository = new RepositoryBlock
-            {
-                Match = new MatchSpec { By = "name", Value = find.RepoName },
-                CreateIfMissing = new RepositoryCreate
-                {
-                    Name = find.RepoName,
-                    Type = "Website",
-                    Url = NullIfEmpty(find.RepoUrl),
-                },
-            },
-            Source = new SourceBlock
-            {
-                Match = new MatchSpec
-                {
-                    By = "attribute", Key = "MH_SourceKey", Value = find.SourceKey,
-                },
-                CreateIfMissing = new SourceCreate
-                {
-                    Title = find.SourceTitle,
-                    Author = NullIfEmpty(find.SourceAuthor),
-                    Abbreviation = NullIfEmpty(find.Abbrev),
-                    Attributes = [new AttributeKV("MH_SourceKey", find.SourceKey)],
-                    RepositoryRef = new RepoRefSpec
-                    {
-                        CallNumber = NullIfEmpty(find.CallNumber),
-                        MediaType = "Book",
-                    },
-                },
-            },
-            Citation = new CitationBlock
-            {
-                Page = NullIfEmpty(find.Page),
-                Date = date,
-                Confidence = find.Confidence,
-                Attributes = string.IsNullOrWhiteSpace(find.Permalink)
-                    ? null
-                    : [new AttributeKV("MH_Permalink", find.Permalink)],
-                Notes = string.IsNullOrWhiteSpace(find.NoteText)
-                    ? null
-                    : [new NoteSpec { Type = "Citation", Text = find.NoteText }],
-            },
-        };
-        if (targets.Count > 0)
-            request.Targets = targets;
-        if (createEvent is not null)
+            Name = find.RepoName,
+            Type = "Website",
+            Url = NullIfEmpty(find.RepoUrl),
+        },
+    };
+
+    private static SourceBlock SourceBlockOf(FindSnapshot find) => new()
+    {
+        Match = new MatchSpec
         {
-            request.CreateEventIfMissing = new CreateEventBlock
+            By = "attribute", Key = "MH_SourceKey", Value = find.SourceKey,
+        },
+        CreateIfMissing = new SourceCreate
+        {
+            Title = find.SourceTitle,
+            Author = NullIfEmpty(find.SourceAuthor),
+            Abbreviation = NullIfEmpty(find.Abbrev),
+            Attributes = [new AttributeKV("MH_SourceKey", find.SourceKey)],
+            RepositoryRef = new RepoRefSpec
             {
-                PersonHandle = createEvent.OwnerKind == "person"
-                    ? createEvent.OwnerHandle : null,
-                FamilyHandle = createEvent.OwnerKind == "family"
-                    ? createEvent.OwnerHandle : null,
-                EventType = createEvent.EventType!,
-                Date = date,
-                Description = createEvent.EventDescription,
-            };
+                CallNumber = NullIfEmpty(find.CallNumber),
+                MediaType = "Book",
+            },
+        },
+    };
+
+    private static CitationBlock CitationBlockOf(FindSnapshot find) => new()
+    {
+        Page = NullIfEmpty(find.Page),
+        Date = ParseDate(find.DateText),
+        Confidence = find.Confidence,
+        Attributes = string.IsNullOrWhiteSpace(find.Permalink)
+            ? null
+            : [new AttributeKV("MH_Permalink", find.Permalink)],
+        Notes = string.IsNullOrWhiteSpace(find.NoteText)
+            ? null
+            : [new NoteSpec { Type = "Citation", Text = find.NoteText }],
+    };
+
+    /// <summary>Serializes the change list + the virtual subgraph into
+    /// one batch: bare persons, family links (new families and member
+    /// additions to real ones), events, one citation per find covering
+    /// all its targets, plus existing-citation attaches. No client-side
+    /// ordering logic — the addon resolves the references in a fixed
+    /// safe order inside ONE transaction.</summary>
+    private BatchRequest BuildBatch()
+    {
+        var request = new BatchRequest { RequestId = Guid.NewGuid().ToString() };
+
+        foreach (var entry in Changes.Where(c => c.Kind == ChangeKind.CreatePerson))
+        {
+            var node = _graph.Person("new:" + entry.Id)
+                ?? throw new InvalidOperationException(
+                    "Person fehlt im Baumgraphen: " + entry.EntityLabel);
+            request.Persons.Add(new BatchPersonSpec
+            {
+                Tmp = node.Id,
+                Given = NullIfEmpty(node.Given),
+                Surname = NullIfEmpty(node.Surname),
+                Gender = node.Gender,
+            });
         }
-        if (find.CopyLinkToPersons && !string.IsNullOrWhiteSpace(find.Permalink))
+
+        foreach (var family in _graph.AllFamilies)
         {
-            request.PersonUrl = new PersonUrlSpec
+            if (family.IsVirtual)
             {
-                Path = find.Permalink.Trim(),
-                Description = createEvent is not null
-                    ? $"{createEvent.EventType} {find.DateText}"
-                    : "Beleg " + find.Page,
-                Type = "Digitalisat",
-            };
+                request.Families.Add(new BatchFamilySpec
+                {
+                    Tmp = family.Id,
+                    Father = family.Father?.Id,
+                    Mother = family.Mother?.Id,
+                    Children = family.Children.Count > 0
+                        ? family.Children.Select(c => c.Id).ToList() : null,
+                });
+            }
+            else
+            {
+                // a real family only appears when it gains virtual members
+                var spec = new BatchFamilySpec
+                {
+                    Handle = family.Id,
+                    Father = family.Father is { IsVirtual: true } father
+                        ? father.Id : null,
+                    Mother = family.Mother is { IsVirtual: true } mother
+                        ? mother.Id : null,
+                };
+                var virtualChildren = family.Children
+                    .Where(c => c.IsVirtual).Select(c => c.Id).ToList();
+                if (virtualChildren.Count > 0)
+                    spec.Children = virtualChildren;
+                if (spec.Father is not null || spec.Mother is not null
+                    || spec.Children is not null)
+                    request.Families.Add(spec);
+            }
+        }
+
+        foreach (var entry in Changes.Where(c => c.Kind == ChangeKind.CreateEvent))
+        {
+            var isPerson = entry.OwnerKind is "person" or "pending-person";
+            var ownerRef = entry.OwnerKind == "pending-person"
+                ? "new:" + entry.OwnerHandle
+                : entry.OwnerHandle!;
+            request.Events.Add(new BatchEventSpec
+            {
+                Tmp = "evt:" + entry.Id,
+                Type = entry.EventType!,
+                Person = isPerson ? ownerRef : null,
+                Family = isPerson ? null : ownerRef,
+                // the event's OWN date (user-entered, may be qualified
+                // "vor 1757") — the record's date stays on the citation
+                Date = entry.EventDate,
+                Description = entry.EventDescription,
+            });
+        }
+
+        // one citation per find (record), attached to everything it
+        // evidences: explicit attach targets + the find's new events
+        foreach (var group in Changes
+                     .Where(c => c.Kind is ChangeKind.AttachCitation
+                                 or ChangeKind.CreateEvent)
+                     .GroupBy(c => c.Find!.GroupKey))
+        {
+            var find = group.First().Find!;
+            var targets = new List<BatchTargetRef>();
+            var seen = new HashSet<(string, string)>();
+            string? eventLabel = null;
+            foreach (var entry in group)
+            {
+                var (type, reference) = entry.Kind == ChangeKind.CreateEvent
+                    ? ("event", "evt:" + entry.Id)
+                    : entry.TargetKind == "pending-event"
+                        ? ("event", "evt:" + entry.TargetHandle)
+                        : (entry.TargetKind!, entry.TargetHandle!);
+                if (entry.Kind == ChangeKind.CreateEvent)
+                    eventLabel ??= entry.EventTypeLabel ?? entry.EventType;
+                if (seen.Add((type, reference)))
+                    targets.Add(new BatchTargetRef { Type = type, Ref = reference });
+            }
+            request.Citations.Add(new BatchCitationSpec
+            {
+                Repository = RepoBlock(find),
+                Source = SourceBlockOf(find),
+                Citation = CitationBlockOf(find),
+                Targets = targets,
+                PersonUrl = find.CopyLinkToPersons
+                            && !string.IsNullOrWhiteSpace(find.Permalink)
+                    ? new PersonUrlSpec
+                    {
+                        Path = find.Permalink.Trim(),
+                        Description = eventLabel is not null
+                            ? $"{eventLabel} {find.DateText}"
+                            : "Beleg " + find.Page,
+                        Type = "Digitalisat",
+                    }
+                    : null,
+            });
+        }
+
+        foreach (var group in Changes
+                     .Where(c => c.Kind == ChangeKind.AttachExisting)
+                     .GroupBy(c => c.CitationHandle!))
+        {
+            request.Attach.Add(new BatchAttachSpec
+            {
+                Citation = group.Key,
+                Targets = group.Select(entry => new BatchTargetRef
+                {
+                    Type = entry.TargetKind == "pending-event"
+                        ? "event" : entry.TargetKind!,
+                    Ref = entry.TargetKind == "pending-event"
+                        ? "evt:" + entry.TargetHandle : entry.TargetHandle!,
+                }).ToList(),
+            });
         }
         return request;
     }
 
-    /// <summary>Executes the change list: create-event entries first
-    /// (each coalesced with same-record citation drops into ONE capture
-    /// sharing the citation), then remaining citation attaches grouped
-    /// per record. Successes leave the list; failures stay marked.</summary>
+    /// <summary>Sends the whole change list as ONE capture-batch = ONE
+    /// Gramps transaction: either everything lands (a single undo in
+    /// Gramps reverts it all) or nothing does and every entry stays in
+    /// the list, marked with the error.</summary>
     private async Task SendAllAsync()
     {
-        if (_client is null)
+        if (_client is null || Changes.Count == 0)
             return;
-        var creates = Changes.Where(c => c.Kind == ChangeKind.CreateEvent).ToList();
-        var attaches = Changes.Where(c => c.Kind == ChangeKind.AttachCitation).ToList();
-        var createdEventHandles = new Dictionary<string, string>();
-        var succeeded = 0;
-        var failed = 0;
-
-        async Task RunCapture(FindSnapshot find, List<TargetRef> targets,
-                              ChangeEntry? createEvent, List<ChangeEntry> covered)
+        BatchRequest request;
+        try
         {
-            try
-            {
-                var request = BuildRequest(find, targets, createEvent);
-                Log("capture request", request);
-                var response = await _client.CaptureAsync(request);
-                Log("capture response", response);
-                if (createEvent is not null
-                    && response.Created.Event?.Handle is { } newHandle)
-                    createdEventHandles[createEvent.Id] = newHandle;
-                foreach (var entry in covered)
-                    Changes.Remove(entry);
-                succeeded += covered.Count;
-            }
-            catch (Exception ex)
-            {
-                var message = ex is BridgeException bridgeEx
-                    ? $"{bridgeEx.Code}: {bridgeEx.Message}" : ex.Message;
-                foreach (var entry in covered)
-                    entry.Error = message;
-                failed += covered.Count;
-            }
+            request = BuildBatch();
         }
-
-        // phase A: create events, coalescing same-record citation drops
-        foreach (var create in creates)
+        catch (Exception ex)
         {
-            var sameRecord = attaches.Where(a =>
-                a.Find!.GroupKey == create.Find!.GroupKey).ToList();
-            var realTargets = sameRecord.Where(a => a.TargetKind is "person" or "event")
-                .ToList();
-            var redundant = sameRecord.Where(a =>
-                a.TargetKind == "pending-event" && a.TargetHandle == create.Id).ToList();
-            var covered = new List<ChangeEntry> { create };
-            covered.AddRange(realTargets);
-            covered.AddRange(redundant);   // create's own citation covers these
-            foreach (var entry in realTargets.Concat(redundant))
-                attaches.Remove(entry);
-            await RunCapture(create.Find!,
-                realTargets.Select(a => new TargetRef
-                { Type = a.TargetKind!, Handle = a.TargetHandle! }).ToList(),
-                create, covered);
+            QueueStatus = "Stapel nicht erstellbar: " + ex.Message;
+            LogNote("upload", "Stapel nicht erstellbar: " + ex.Message);
+            return;
         }
-
-        // phase B: remaining citation drops, one capture per record
-        foreach (var group in attaches.GroupBy(a => a.Find!.GroupKey))
+        LogNote("upload", $"Stapel: {request.Persons.Count} Person(en), "
+            + $"{request.Families.Count} Familie(n), "
+            + $"{request.Events.Count} Ereignis(se), "
+            + $"{request.Citations.Count} Zitat(e), "
+            + $"{request.Attach.Count} Zitat-Anhänge");
+        try
         {
-            var targets = new List<TargetRef>();
-            var covered = new List<ChangeEntry>();
-            var blocked = false;
-            foreach (var entry in group)
-            {
-                var handle = entry.TargetKind == "pending-event"
-                    ? createdEventHandles.GetValueOrDefault(entry.TargetHandle!)
-                    : entry.TargetHandle;
-                if (handle is null)
-                {
-                    entry.Error = "Voraussetzung (neues Ereignis) nicht ausgeführt";
-                    blocked = true;
-                    continue;
-                }
-                targets.Add(new TargetRef
-                {
-                    Type = entry.TargetKind == "pending-event" ? "event" : entry.TargetKind!,
-                    Handle = handle,
-                });
-                covered.Add(entry);
-            }
-            if (blocked)
-                failed += group.Count() - covered.Count;
-            if (covered.Count > 0)
-                await RunCapture(group.First().Find!, targets, null, covered);
-        }
+            Log("capture-batch request", request);
+            var response = await _client.CaptureBatchAsync(request);
+            Log("capture-batch response", response);
 
-        // phase C: attach EXISTING citations, one bridge call per
-        // citation with all its checked targets
-        var existingAttaches = Changes
-            .Where(c => c.Kind == ChangeKind.AttachExisting).ToList();
-        foreach (var group in existingAttaches.GroupBy(c => c.CitationHandle!))
+            // temp ids -> real handles, node identity kept (no view jump)
+            foreach (var (tmp, created) in response.Created.Persons)
+                if (_graph.Person(tmp) is { } node)
+                    _graph.ReplacePersonId(node, created.Handle);
+            foreach (var (tmp, created) in response.Created.Families)
+                if (_graph.Family(tmp) is { } family)
+                    _graph.ReplaceFamilyId(family, created.Handle);
+
+            var count = Changes.Count;
+            Changes.Clear();
+            // spec 7.3: read back the displayed slice, without moving
+            // the view — a just-uploaded virtual center carries its
+            // real handle by now
+            if (_centerNode is not null)
+                await LoadCenterAsync(_centerNode.Id);
+            AfterChangesMutation(
+                $"{count} Änderung(en) in EINER Transaktion ausgeführt "
+                + "(ein Undo in Gramps)");
+        }
+        catch (Exception ex)
         {
-            var targets = new List<TargetRef>();
-            var covered = new List<ChangeEntry>();
-            foreach (var entry in group)
-            {
-                var handle = entry.TargetKind == "pending-event"
-                    ? createdEventHandles.GetValueOrDefault(entry.TargetHandle!)
-                    : entry.TargetHandle;
-                if (handle is null)
-                {
-                    entry.Error = "Voraussetzung (neues Ereignis) nicht ausgeführt";
-                    failed++;
-                    continue;
-                }
-                targets.Add(new TargetRef
-                {
-                    Type = entry.TargetKind == "pending-event"
-                        ? "event" : entry.TargetKind!,
-                    Handle = handle,
-                });
-                covered.Add(entry);
-            }
-            if (covered.Count == 0)
-                continue;
-            try
-            {
-                var request = new AttachRequest
-                {
-                    RequestId = Guid.NewGuid().ToString(),
-                    Targets = targets,
-                };
-                Log("attach request", request);
-                var response = await _client.AttachCitationAsync(group.Key, request);
-                Log("attach response", response);
-                foreach (var entry in covered)
-                    Changes.Remove(entry);
-                succeeded += covered.Count;
-            }
-            catch (Exception ex)
-            {
-                var message = ex is BridgeException bridgeEx
-                    ? $"{bridgeEx.Code}: {bridgeEx.Message}" : ex.Message;
-                foreach (var entry in covered)
-                    entry.Error = message;
-                failed += covered.Count;
-            }
+            var message = ex is BridgeException bridgeEx
+                ? $"{bridgeEx.Code}: {bridgeEx.Message}" : ex.Message;
+            foreach (var entry in Changes)
+                entry.Error = "Stapel fehlgeschlagen: " + message;
+            LogNote("capture-batch FEHLER", message);
+            QueueStatus = "Upload fehlgeschlagen — nichts geschrieben "
+                + "(eine Transaktion): " + message;
         }
-
-        // spec 7.3: read back the displayed slice, without moving the view
-        if (Center is not null)
-            await LoadCenterAsync(Center.Handle);
-        SyncFacts();
-        RecomputeBadges();
-        RebuildChangeTree();
-        RefreshLinkView();
-        QueueStatus = $"{succeeded} Änderung(en) ausgeführt"
-                      + (failed > 0 ? $", {failed} fehlgeschlagen (in der Liste markiert)" : "")
-                      + " — Anzeige aus Gramps aktualisiert";
     }
 
     // ---- log ---------------------------------------------------------
+    //
+    // Everything in the log panel also goes to a session logfile —
+    // client-side blocks (unresolvable links, missing prerequisites)
+    // never reach the bridge, so without the file they left no trace.
 
-    private string _logText = "";
+    private static readonly string s_logFile = System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "Matrikelhelfer", "GrampsBridgeTester.log");
+
+    private bool _logFileStarted;
+
+    private string _logText = "Logdatei: " + s_logFile + "\n\n";
     public string LogText { get => _logText; set => Set(ref _logText, value); }
 
-    private void Log(string title, object payload)
+    private void Log(string title, object payload) =>
+        AppendLog(title, JsonSerializer.Serialize(payload, BridgeJson.Options));
+
+    private void LogNote(string title, string text) => AppendLog(title, text);
+
+    private void AppendLog(string title, string body)
     {
-        var json = JsonSerializer.Serialize(payload, BridgeJson.Options);
-        LogText = $"---- {DateTime.Now:HH:mm:ss} {title} ----\n{json}\n\n" + LogText;
+        var block = $"---- {DateTime.Now:HH:mm:ss} {title} ----\n{body}\n\n";
+        LogText = block + LogText;
+        try
+        {
+            System.IO.Directory.CreateDirectory(
+                System.IO.Path.GetDirectoryName(s_logFile)!);
+            if (!_logFileStarted)
+            {
+                System.IO.File.WriteAllText(s_logFile,
+                    $"==== GrampsBridgeTester {DateTime.Now:yyyy-MM-dd HH:mm:ss} ====\n\n");
+                _logFileStarted = true;
+            }
+            System.IO.File.AppendAllText(s_logFile, block);
+        }
+        catch (Exception)
+        {
+            // best-effort: a log that cannot be written never fails the app
+        }
     }
 
     // ---- helpers -----------------------------------------------------

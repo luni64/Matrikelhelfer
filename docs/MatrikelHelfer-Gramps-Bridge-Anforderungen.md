@@ -355,6 +355,28 @@ Führt die gesamte Erfassung **in einer einzigen Gramps-Transaktion** aus. Das i
 }
 ```
 
+### 5.7b `POST /capture-batch` — Sitzungs-Upload in einer Transaktion
+
+Umgesetzt 2026-08-19 (Addon 0.13.0), nachdem die klientseitige Abhängigkeitsauflösung (Fixpunkt über Personen-Captures) sich als fehleranfällig erwiesen hatte: Der gesamte Upload einer Gramps-Modus-Sitzung läuft in **einer** `DbTxn` — alles oder nichts, **ein einziges Undo** verwirft die komplette Sitzung (löst das gleichnamige Vorhaben aus §7.3 ein).
+
+```json
+{
+  "request_id": "…",
+  "persons":  [ { "tmp": "new:p1", "given": "…", "surname": "…", "gender": "F" } ],
+  "families": [ { "tmp": "new:f1", "father": "<handle|tmp>", "mother": "…", "children": ["…"] },
+                { "handle": "<bestehende Familie>", "children": ["new:p3"] } ],
+  "events":   [ { "tmp": "evt:e1", "type": "Marriage", "family": "new:f1", "date": { … } } ],
+  "citations": [ { "repository": { … }, "source": { … }, "citation": { … },
+                   "targets": [ { "type": "event", "ref": "evt:e1" } ],
+                   "person_url": { … } } ],
+  "attach":   [ { "citation": "<handle>", "targets": [ … ] } ]
+}
+```
+
+Verarbeitung in fester, immer auflösbarer Reihenfolge: nackte Personen → Familienverknüpfungen (neue Familien bzw. **nur ergänzende** Mitglieder bestehender Familien; belegte Partner-Slots → 400) → Ereignisse → Zitate (Repo/Quelle match-or-create, innerhalb des Stapels gecacht: mehrere Zitate desselben Buchs teilen **eine** Quelle) → Anhängen vorhandener Zitate. Referenzen sind wahlweise echte Handles oder vom Client gewählte temporäre IDs; die Antwort liefert die Zuordnung `tmp → handle` je Objektart. Idempotent über `request_id`. Die Zwischenzustände (unverknüpfte Personen) sind nie beobachtbar — bei jedem Fehler bricht die Transaktion vollständig ab.
+
+Der Client wird damit trivial: Änderungsliste + virtueller Teilgraph werden serialisiert und in einem Aufruf gesendet; sämtliche klientseitige Reihenfolge-/Verknüpfungslogik entfällt. `POST /capture` bleibt für Einzel-Erfassungen bestehen.
+
 ### 5.8 Einzeloperationen (nachrangige Priorität)
 
 Für Sonderfälle und Werkzeugcharakter, jeweils in eigener Transaktion:
@@ -473,7 +495,7 @@ Die Verknüpfungsansicht bietet das Personenobjekt nicht als Zuordnungsziel an: 
 Jede Nutzeraktion — Zitat einem Ereignis zugeordnet, Ereignis vorgemerkt, später: Person angelegt — erzeugt **sofort** einen Eintrag in einer lokalen **Änderungsliste**; einen separaten „Merken"-Schritt gibt es nicht. Einträge frieren den Fund-Datenstand zum Aktionszeitpunkt ein (im echten Client: Verweis auf den gespeicherten Fund, persistiert in `library.json`). Doppelte Ablage (gleicher Fund, gleiches Ziel) wird mit Hinweis ignoriert. Die Liste wird **als Baum** angezeigt: Wurzeln sind die betroffenen Personen/Familien, darunter die Operationen, abhängige Operationen verschachtelt — die Abhängigkeitsstruktur *ist* die Anzeige. **Löschen eines Eintrags macht die Aktion rückgängig** (auch in der Baumanzeige: Markierungen und „(neu)"-Zeilen verschwinden) und kaskadiert nach Rückfrage über abhängige Einträge; Löschen einer Wurzel entfernt alle Änderungen der Entität. Vorgemerkte neue Ereignisse erscheinen sofort als „(neu)"-Zeile in der Faktenliste und sind selbst Ablageziele.
 
 **Upload („An Gramps senden")**
-Der Upload führt die Änderungsliste aus: erzeugende Einträge zuerst, dann Zitat-Anhänge, wobei Einträge **desselben Fundes zu einem Capture mit gemeinsamem Zitat zusammengefasst** werden (ein Zitatobjekt, mehrfach referenziert — das GEDCOM-/Gramps-Modell); Verweise auf vorgemerkte Ereignisse werden über die zurückgemeldeten Handles aufgelöst. **Erfolgreiche Einträge verlassen die Liste ersatzlos** — nach dem Rücklesen ist Gramps die sichtbare Wahrheit, ein „hochgeladen"-Status ist überflüssig (Dublettenschutz leistet im echten Client der Upload-Vermerk am Fund). Fehlgeschlagene Einträge bleiben rot markiert und erneut ausführbar; Abhängige eines gescheiterten Eintrags werden blockiert. Geplante Ausbaustufe: **Batch-Endpunkt** (`POST /capture-batch`) — der gesamte Upload in *einer* Gramps-Transaktion, ein einziges Undo verwirft die ganze Sitzung.
+Der Upload führt die Änderungsliste aus: erzeugende Einträge zuerst, dann Zitat-Anhänge, wobei Einträge **desselben Fundes zu einem Capture mit gemeinsamem Zitat zusammengefasst** werden (ein Zitatobjekt, mehrfach referenziert — das GEDCOM-/Gramps-Modell); Verweise auf vorgemerkte Ereignisse werden über die zurückgemeldeten Handles aufgelöst. **Erfolgreiche Einträge verlassen die Liste ersatzlos** — nach dem Rücklesen ist Gramps die sichtbare Wahrheit, ein „hochgeladen"-Status ist überflüssig (Dublettenschutz leistet im echten Client der Upload-Vermerk am Fund). Fehlgeschlagene Einträge bleiben rot markiert und erneut ausführbar. **Umgesetzt (2026-08-19):** Der Upload läuft über den Batch-Endpunkt (§5.7b) — der gesamte Stapel in *einer* Gramps-Transaktion, alles oder nichts, ein einziges Undo verwirft die ganze Sitzung; bei einem Fehler bleibt die komplette Liste stehen (nichts wurde geschrieben) und trägt die Fehlermeldung.
 
 **Rücklesen nach dem Upload, ohne Sichtsprung**
 Nach dem Upload liest der Client den angezeigten Ausschnitt **vollständig neu** aus Gramps (Detail-Refetch der dargestellten Personen), damit die Anzeige garantiert dem tatsächlichen Gramps-Stand entspricht — einschließlich Änderungen, die der Anwender zwischenzeitlich direkt in Gramps gemacht hat. Da typischerweise *während* der Arbeit gespeichert wird, darf sich der **sichtbare Zustand des Baums dabei nicht ändern**: Zentrum, Layout und Scrollpositionen bleiben erhalten; die frischen Daten fließen in die bestehenden Boxen ein (Aktualisierung statt Neuaufbau — Boxen sind über Handle bzw. temporäre ID identifiziert). Ausstehende Markierungen wechseln **an Ort und Stelle** in den Zustand „hochgeladen"; virtuelle Personen werden nahtlos durch die real angelegten ersetzt (temporäre ID → Handle), ohne dass sich ihre Box bewegt.
@@ -487,6 +509,16 @@ Kirchenbuch-Durchsicht erzeugt typischerweise Serien von Funden zu **noch nicht 
 - „Neu"-Boxen im Baum erzeugen eine **virtuelle Person** (lokaler Stub mit temporärer ID; Name/Geschlecht/Daten aus dem Fund vorbelegt). Virtuelle Personen erscheinen im Baum wie echte und können sofort (auch mehrfach) Zuordnungen erhalten.
 - Beim Upload wird die Abhängigkeitsreihenfolge aufgelöst: zuerst ein Capture mit `create_person`-Block (Person + Familienverknüpfung als Kind/Partner + Ereignis + Zitat in einer Transaktion), danach ersetzen die zurückgemeldeten Handles die temporären IDs in Folge-Zuordnungen.
 - Bridge-Erweiterung: `create_person` in `POST /capture` (Name, Geschlecht, `child_of_family` bzw. `spouse_of`), Antwort enthält `created.person`. Die Bausteine (Person/Name/ChildRef/Family-Commit) sind durch die Testsuite bereits erprobt; v1 der Oberfläche zeigt „Neu"-Boxen deaktiviert.
+
+**Umsetzungsstand Personen-Anlage (2026-08-19, Addon 0.11.0 + Tester):** umgesetzt, mit folgenden Präzisierungen gegenüber dem Konzept:
+- `create_person` in `POST /capture`: `given`/`surname` (mind. eines), `gender` (M/F/U) und **genau eine** Verknüpfung — `child_of_family`; `child_of_person` (einzelner bekannter Elternteil, Familie wird miterzeugt); `spouse_of` (+ optional `family_handle`, um eine partnerlose Familie aufzufüllen statt eine neue zu gründen); `parent_of` (nutzt die bestehende Elternfamilie des Kindes oder erzeugt eine, Vater-/Mutter-Slot nach Geschlecht, belegter Slot → 400). Antwort: `created.person`, bei miterzeugter Familie `created.family`.
+- `create_event_if_missing` darf `person_handle: "@new"` bzw. `family_handle: "@new"` referenzieren — das in derselben Erfassung erzeugte Objekt.
+- Der `citation`-Block ist seither **optional** (nur sinnvoll für reine Personen-/Ereignisanlage; `targets` erfordern weiterhin ein Zitat, ein Ereignis ohne Zitatblock wird unbelegt angelegt).
+- Tester-UI: Klick auf eine „Neu"-Box → Namensdialog (Geschlecht und Nachname nach Slot vorbelegt: Vater-Slot männlich mit Nachname der Bezugsperson, Partner-Slot gegengeschlechtlich, Kind unbestimmt) → die virtuelle Person erscheint an Ort und Stelle im Baum (blau, „(neu)“) und als eigene Wurzel in der Änderungsliste. **Ereignisdatum ≠ Eintragsdatum (2026-08-19):** Der Ereignisdialog erfragt das Datum des *Ereignisses* selbst — vorbelegt mit dem Datum des offenen Eintrags (richtig für das Primärereignis, die Taufe aus dem Taufbuch), aber frei änderbar samt Gramps-Qualifizierern (genau/um/vor/nach). Der Normalfall abgeleiteter Erwähnungen braucht das: „Mutter der Braut bereits verstorben“ im Trauungseintrag 1757 wird ein Sterbeereignis „vor 1757“, nicht ein Tod am Hochzeitstag; ein Taufeintrag nennt oft zusätzlich das Geburtsdatum — Taufe und Geburt sind dann **zwei Ereignisse mit verschiedenen Daten aus einem Eintrag**, die beim Upload dasselbe (eine) Zitat teilen. Das Eintragsdatum bleibt unverändert das Datum des **Zitats**. **Klick auf die virtuelle Box zentriert sie** — exakt dieselbe Geste und derselbe Codepfad wie bei echten Personen.
+
+**Lokaler Personen-/Familiengraph (Umbau 2026-08-19):** Grundlage des Baums ist ein lokaler Objektgraph — geladene und neu angelegte Personen sind **derselbe Knotentyp**; zwischen den Personen steht, wie in Gramps selbst, das **Familienobjekt** (Partner, Kinder, Familienereignisse). Server-Abrufe aktualisieren Knoten an Ort und Stelle (Identitäts-Map über Handle bzw. temporäre ID; das Personen-Detail liefert dafür zusätzlich `parent_family_handle`, Addon 0.12.0); neue Personen werden in denselben Graphen eingehängt. Damit sind auch Ketten begehbar: Eltern einer virtuellen Braut, Kinder eines virtuellen Paars — einschließlich **Familienereignissen an neuen Familien** (Trauung eines neuen Paars). Der Upload serialisiert Änderungsliste + virtuellen Teilgraphen in **einen** `capture-batch`-Aufruf (§5.7b): die Abhängigkeitsauflösung liegt vollständig im Addon, ein Undo verwirft die ganze Sitzung, und die zurückgemeldeten Handles ersetzen die temporären IDs **im Knoten selbst** — die Boxen bleiben stehen, kein Sichtsprung.
+
+**Vorgemerkt — lokales Sichern des Arbeitsstands:** Der virtuelle Teilgraph und die Änderungsliste sind bewusst als flache, ID-referenzierte Datensätze serialisierbar gehalten (stabile temporäre IDs; echte Personen nur als Handle-Referenz, beim Fortsetzen gegen Gramps revalidiert, `tree_id`-geprüft; Fund-Snapshots in sich geschlossen). Eine Sitzung mit noch nicht hochgeladenen neuen Personen kann damit später unterbrochen und fortgesetzt werden — derselbe Mechanismus wie der Offline-Modus (§7.4). Noch nicht implementiert.
 
 ### 7.4 Betriebsarten
 

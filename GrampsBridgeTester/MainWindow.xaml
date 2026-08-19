@@ -72,12 +72,18 @@
                 <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
                     <Setter TargetName="Box" Property="BorderBrush" Value="#C8C8C8" />
                     <Setter TargetName="Box" Property="Background" Value="#FBFBFB" />
-                    <Setter TargetName="Box" Property="Cursor" Value="Arrow" />
-                    <Setter TargetName="Box" Property="ToolTip" Value="{x:Null}" />
+                    <Setter TargetName="Box" Property="ToolTip"
+                            Value="Neue Person in diesem Platz anlegen" />
                     <Setter TargetName="NameLine" Property="Foreground" Value="#A0A0A0" />
                     <Setter TargetName="BirthLine" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="DeathLine" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="BadgeLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsVirtual}" Value="True">
+                    <Setter TargetName="Box" Property="BorderBrush" Value="#1440C8" />
+                    <Setter TargetName="Box" Property="Background" Value="#F3F8FF" />
+                    <Setter TargetName="NameLine" Property="Foreground" Value="#1440C8" />
+                    <Setter TargetName="BirthLine" Property="Foreground" Value="#1440C8" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>

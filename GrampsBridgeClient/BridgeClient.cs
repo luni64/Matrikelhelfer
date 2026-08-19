@@ -72,6 +72,13 @@ public sealed class BridgeClient(GrampsEndpoint endpoint)
                                               CancellationToken ct = default) =>
         PostAsync<CaptureResponse>("/capture", request, ct);
 
+    /// <summary>The whole Gramps-Modus upload as ONE transaction:
+    /// persons, family links, events, citations, attaches —
+    /// all-or-nothing, a single undo in Gramps.</summary>
+    public Task<BatchResponse> CaptureBatchAsync(BatchRequest request,
+                                                 CancellationToken ct = default) =>
+        PostAsync<BatchResponse>("/capture-batch", request, ct);
+
     /// <summary>Attach an existing citation to further objects (5.8) —
     /// "this church record also evidences that fact".</summary>
     public Task<AttachResponse> AttachCitationAsync(

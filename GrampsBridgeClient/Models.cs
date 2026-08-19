@@ -80,7 +80,8 @@ public sealed record PersonDetail(
     int CitationCount, List<NameInfo> Names, List<PersonEvent> Events,
     List<PersonBrief> Parents, List<FamilyInfo> Families,
     LifeEvent? Birth = null, LifeEvent? Death = null,
-    List<CitationRef>? Citations = null);
+    List<CitationRef>? Citations = null,
+    string? ParentFamilyHandle = null);
 
 // ---- /sources, /repositories (5.6) ----------------------------------
 
@@ -220,13 +221,33 @@ public sealed class PersonUrlSpec
     public string? Type { get; set; }           // default "Digitalisat"
 }
 
+/// <summary>Create a person and link them into the tree (spec 7.3 v2).
+/// Exactly one of ChildOfFamily / ChildOfPerson / SpouseOf / ParentOf.
+/// SpouseOf may add FamilyHandle to join an existing partner-less
+/// family instead of creating a new one. In the same capture,
+/// CreateEventBlock may reference the new person/family as "@new".</summary>
+public sealed class CreatePersonBlock
+{
+    public string? Given { get; set; }
+    public string? Surname { get; set; }
+    public string? Gender { get; set; }         // M | F | U
+    public string? ChildOfFamily { get; set; }
+    public string? ChildOfPerson { get; set; }
+    public string? SpouseOf { get; set; }
+    public string? FamilyHandle { get; set; }
+    public string? ParentOf { get; set; }
+}
+
+/// <summary>Source and Citation may be omitted only for a bare
+/// create_person/create_event capture (nothing to attach then).</summary>
 public sealed class CaptureRequest
 {
     public string? RequestId { get; set; }
     public RepositoryBlock? Repository { get; set; }
-    public required SourceBlock Source { get; set; }
-    public required CitationBlock Citation { get; set; }
+    public SourceBlock? Source { get; set; }
+    public CitationBlock? Citation { get; set; }
     public List<TargetRef>? Targets { get; set; }
+    public CreatePersonBlock? CreatePerson { get; set; }
     public CreateEventBlock? CreateEventIfMissing { get; set; }
     public PersonUrlSpec? PersonUrl { get; set; }
 }
@@ -246,13 +267,101 @@ public sealed record PersonUrlResult(
 public sealed record CreatedInfo(
     CreatedObject? Repository, CreatedObject? Source, CreatedObject? Citation,
     CreatedObject? Event, List<CreatedNote>? Notes,
-    List<PersonUrlResult>? PersonUrls = null);
+    List<PersonUrlResult>? PersonUrls = null,
+    CreatedObject? Person = null, CreatedObject? Family = null);
 
 public sealed record AttachedTo(string Type, string Handle, string? GrampsId);
 
 public sealed record CaptureResponse(
     string? RequestId, CreatedInfo Created, List<AttachedTo> AttachedTo,
     string TransactionLabel);
+
+// ---- POST /capture-batch ---------------------------------------------
+//
+// The whole Gramps-Modus upload in ONE transaction. References are
+// either real Gramps handles or temp ids the client chooses (any
+// string); the addon resolves persons -> families -> events ->
+// citations in order, all-or-nothing, one undo.
+
+public sealed class BatchPersonSpec
+{
+    public required string Tmp { get; set; }
+    public string? Given { get; set; }
+    public string? Surname { get; set; }
+    public string? Gender { get; set; }
+}
+
+/// <summary>New family (Tmp) or ADD members to an existing one
+/// (Handle). Occupied partner slots are a 400 — members are only ever
+/// added, never replaced.</summary>
+public sealed class BatchFamilySpec
+{
+    public string? Tmp { get; set; }
+    public string? Handle { get; set; }
+    public string? Father { get; set; }
+    public string? Mother { get; set; }
+    public List<string>? Children { get; set; }
+}
+
+public sealed class BatchEventSpec
+{
+    public required string Tmp { get; set; }
+    public required string Type { get; set; }       // event-type xml name
+    public string? Person { get; set; }             // exactly one of these
+    public string? Family { get; set; }
+    public string? Role { get; set; }
+    public DateSpec? Date { get; set; }
+    public string? Description { get; set; }
+}
+
+public sealed class BatchTargetRef
+{
+    public required string Type { get; set; }       // person | event | family
+    public required string Ref { get; set; }        // handle | temp id
+}
+
+public sealed class BatchCitationSpec
+{
+    public RepositoryBlock? Repository { get; set; }
+    public SourceBlock? Source { get; set; }
+    public required CitationBlock Citation { get; set; }
+    public required List<BatchTargetRef> Targets { get; set; }
+    public PersonUrlSpec? PersonUrl { get; set; }
+}
+
+public sealed class BatchAttachSpec
+{
+    public required string Citation { get; set; }   // existing citation handle
+    public required List<BatchTargetRef> Targets { get; set; }
+}
+
+public sealed class BatchRequest
+{
+    public string? RequestId { get; set; }
+    public List<BatchPersonSpec> Persons { get; set; } = [];
+    public List<BatchFamilySpec> Families { get; set; } = [];
+    public List<BatchEventSpec> Events { get; set; } = [];
+    public List<BatchCitationSpec> Citations { get; set; } = [];
+    public List<BatchAttachSpec> Attach { get; set; } = [];
+}
+
+public sealed record BatchCitationResult(
+    string Handle, string GrampsId, CreatedObject? Repository,
+    CreatedObject? Source, List<CreatedNote>? Notes,
+    List<PersonUrlResult>? PersonUrls = null);
+
+public sealed record BatchAttachResult(
+    string Citation, List<AttachedObject> AttachedTo);
+
+public sealed record BatchCreated(
+    Dictionary<string, CreatedObject> Persons,
+    Dictionary<string, CreatedObject> Families,
+    Dictionary<string, CreatedObject> Events,
+    List<BatchCitationResult> Citations,
+    List<BatchAttachResult> Attaches);
+
+public sealed record BatchResponse(
+    string? RequestId, BatchCreated Created, string TransactionLabel);
 
 // ---- POST /citations/{handle}/attach (5.8) ---------------------------
 

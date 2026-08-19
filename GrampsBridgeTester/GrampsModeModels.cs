@@ -48,8 +48,14 @@ public sealed class PersonBoxVM(string handle) : ObservableObject
     public string Handle { get; } = handle;
 
     /// <summary>"Neu" slot: keeps the tree skeleton stable where a person
-    /// is missing. Display-only until v2 (virtual persons).</summary>
+    /// is missing. Clicking one creates a virtual person (spec 7.3 v2).</summary>
     public bool IsPlaceholder { get; init; }
+
+    /// <summary>Virtual person: a pending create-person change entry
+    /// shown as a tree box (Handle = "new:" + entry id). Clicking it
+    /// adds events to the new person; navigation needs the upload.</summary>
+    private bool _isVirtual;
+    public bool IsVirtual { get => _isVirtual; set => Set(ref _isVirtual, value); }
 
     /// <summary>Center couple boxes render 1.5x the surrounding ones.</summary>
     private bool _isLarge;
@@ -114,17 +120,29 @@ public sealed class PersonBoxVM(string handle) : ObservableObject
         return parts.Count == 0 ? "" : prefix + " " + string.Join(" ", parts);
     }
 
-    public void UpdateFrom(PersonBrief brief)
+    /// <summary>Real and virtual persons come through the same graph
+    /// node — the box only varies the life lines.</summary>
+    public void UpdateFromNode(TreePerson node)
     {
-        Name = brief.PrimaryName ?? "(ohne Name)";
-        GrampsId = brief.GrampsId ?? "";
-        BirthText = CompactLifeLine("*", brief.Birth);
-        DeathText = CompactLifeLine("+", brief.Death);
+        Name = node.DisplayName is { Length: > 0 } name ? name : "(ohne Name)";
+        GrampsId = node.GrampsId ?? "";
+        IsVirtual = node.IsVirtual;
+        if (node.IsVirtual)
+        {
+            BirthText = "(neu)";
+            DeathText = "";
+            ToolTipText = Name + "\nNoch nicht in Gramps — wird beim "
+                + "Upload angelegt. Klick: auswählen und weiterarbeiten "
+                + "wie bei jeder anderen Person.";
+            return;
+        }
+        BirthText = CompactLifeLine("*", node.Birth);
+        DeathText = CompactLifeLine("+", node.Death);
         ToolTipText = string.Join("\n", new[]
         {
             Name + (GrampsId.Length > 0 ? $"  [{GrampsId}]" : ""),
-            LifeLine("*", brief.Birth),
-            LifeLine("+", brief.Death),
+            LifeLine("*", node.Birth),
+            LifeLine("+", node.Death),
         }.Where(line => line.Length > 0));
     }
 }
@@ -197,11 +215,12 @@ public sealed class FactRowVM(string handle) : ObservableObject
 
     public void UpdateFromPending(ChangeEntry entry)
     {
+        var isFamily = entry.OwnerKind is "family" or "pending-family";
         Label = $"(neu) {entry.EventTypeLabel ?? entry.EventType}"
-            + (entry.Find!.DateText is { Length: > 0 } date ? " " + date : "")
-            + (entry.OwnerKind == "family" ? "  [Familie]" : "");
-        Scope = entry.OwnerKind == "family" ? "family" : "person";
-        FamilyHandle = entry.OwnerKind == "family" ? entry.OwnerHandle : null;
+            + (entry.EventDateText is { Length: > 0 } date ? " " + date : "")
+            + (isFamily ? "  [Familie]" : "");
+        Scope = isFamily ? "family" : "person";
+        FamilyHandle = isFamily ? entry.OwnerHandle : null;
         CitationCount = 0;
         Citations = [];
         IsPendingNew = true;
@@ -273,6 +292,10 @@ public sealed class FindSnapshot
         string.Join("|", SourceKey, Page, DateText, Permalink, NoteText, Confidence);
 }
 
+/// <summary>Families ComboBox item: the graph node plus its rendered
+/// label from the center's perspective.</summary>
+public sealed record TreeFamilyChoice(TreeFamily Family, string Display);
+
 /// <summary>One entry of the grouped event-type ComboBox, from the
 /// bridge's /event-types catalog (= the Gramps event editor's list).
 /// Xml goes to the API, Label to the user, Group to the view's
@@ -280,7 +303,7 @@ public sealed class FindSnapshot
 public sealed record EventTypeChoice(
     string Group, string Xml, string Label, bool IsFamily);
 
-public enum ChangeKind { AttachCitation, CreateEvent, AttachExisting }
+public enum ChangeKind { AttachCitation, CreateEvent, AttachExisting, CreatePerson }
 
 /// <summary>One entry of the change list ("Änderungsliste"): a recorded
 /// user action, executed at upload. DependsOnId links an entry to the
@@ -289,7 +312,8 @@ public enum ChangeKind { AttachCitation, CreateEvent, AttachExisting }
 /// along it.</summary>
 public sealed class ChangeEntry : ObservableObject
 {
-    public string Id { get; } = Guid.NewGuid().ToString("N");
+    // settable so a CreatePerson entry can use its own id as EntityKey
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
     public required ChangeKind Kind { get; init; }
     public FindSnapshot? Find { get; init; }             // null for AttachExisting
     public required string EntityKey { get; init; }      // person/family handle
@@ -305,12 +329,28 @@ public sealed class ChangeEntry : ObservableObject
     public string? CitationHandle { get; init; }
     public string? SourceLabel { get; init; }
 
+    // CreatePerson: display fields only — the linkage (child/spouse/
+    // parent, which family) lives in the tree graph, keyed by this
+    // entry's id ("new:" + Id is the node id)
+    public string? NewGiven { get; init; }
+    public string? NewSurname { get; init; }
+    public string? NewGender { get; init; }
+    public string? RoleLabel { get; init; }              // Vater/Mutter/Partner/Kind
+
     // CreateEvent — EventType is the locale-independent XML name for
-    // the API, EventTypeLabel the localized display text
+    // the API, EventTypeLabel the localized display text. OwnerKind
+    // "pending-person"/"pending-family" references a not-yet-uploaded
+    // graph node; the upload REWRITES owner to the real handle the
+    // moment the node materializes, so retries after partial failures
+    // behave like ordinary events.
     public string? EventType { get; init; }
     public string? EventTypeLabel { get; init; }
-    public string? OwnerKind { get; init; }              // person | family
-    public string? OwnerHandle { get; init; }
+    // the EVENT's own date, user-entered incl. qualifier — NOT the
+    // record's date (that one lives on the citation via Find)
+    public DateSpec? EventDate { get; init; }
+    public string? EventDateText { get; init; }          // display, e.g. "vor 1757"
+    public string? OwnerKind { get; set; }               // person | family | pending-person | pending-family
+    public string? OwnerHandle { get; set; }
     public string? EventDescription { get; init; }
 
     private string? _error;
@@ -325,9 +365,13 @@ public sealed class ChangeEntry : ObservableObject
     public string DisplayText => Kind switch
     {
         ChangeKind.CreateEvent =>
-            $"Neues Ereignis: {EventTypeLabel ?? EventType} — mit Zitat {Find!.Page}",
+            $"Neues Ereignis: {EventTypeLabel ?? EventType}"
+            + (EventDateText is { Length: > 0 } ? " " + EventDateText : "")
+            + $" — mit Zitat {Find!.Page}",
         ChangeKind.AttachExisting =>
             $"Vorhandenes Zitat „{SourceLabel}“ → {TargetLabel}",
+        ChangeKind.CreatePerson =>
+            $"Neue Person: {NewGiven} {NewSurname} ({RoleLabel ?? "?"})",
         _ => $"Zitat {Find!.Page} → {TargetLabel}",
     };
 }

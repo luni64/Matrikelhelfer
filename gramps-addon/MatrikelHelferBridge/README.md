@@ -6,11 +6,17 @@ Specification: `docs/MatrikelHelfer-Gramps-Bridge-Anforderungen.md` in the
 main repo. Current state: **stages 1–6 plus first stage-7 single op**
 (skeleton, gramplet UI, server + marshalling, `/ping`, discovery file, token,
 security checks, person search and detail — events carry their citations
-incl. source title/abbreviation for the client's link view —,
+incl. source title/abbreviation for the client's link view, plus
+`parent_family_handle` for the client's person/family graph —,
 source/repository search, `GET /event-types` (the Gramps event editor's
 grouped type catalog incl. the tree's custom types), `POST /capture` with
-idempotency, and `POST /citations/{handle}/attach` to attach an existing
-citation to further objects).
+idempotency — incl. `create_person` (person + family link as
+child/spouse/parent, "@new" references in the event block, citation
+optional for bare creations) —, `POST /capture-batch` (a whole
+Gramps-Modus session — persons, family links, events, citations,
+attaches — in ONE transaction, all-or-nothing, one undo), and
+`POST /citations/{handle}/attach` to attach an existing citation to
+further objects).
 
 ## Files
 
@@ -26,11 +32,14 @@ citation to further objects).
 powershell -ExecutionPolicy Bypass -File gramps-addon\tests\run_tests.ps1
 ```
 
-Runs 41 integration tests headless inside the real Gramps runtime
+Runs 51 integration tests headless inside the real Gramps runtime
 (`grampsd.exe` CLI + a test tool plugin): auth/origin/content-type checks,
 person search and detail (incl. the per-event citations block),
 source/repository lookup, full capture, source reuse, idempotent replay,
-rollback on bad target, undo, attach-existing-citation. Uses the
+rollback on bad target, undo, attach-existing-citation, person creation
+(child/spouse/parent links, "@new" event owner, citation-less), and the
+capture-batch (full chain in one call, single undo, rollback,
+idempotent replay). Uses the
 dedicated **MHBridgeTest** tree (wiped and reseeded every run — the tool
 refuses any other tree), a separate port (8811) and a temp discovery file,
 so a running production bridge is unaffected. Gramps GUI must be closed

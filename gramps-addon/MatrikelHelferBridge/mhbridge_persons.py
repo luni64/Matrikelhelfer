@@ -294,10 +294,12 @@ def person_detail(db, handle):
                 events.append(row)
 
     parents = []
-    family_handle = person.get_main_parents_family_handle()
-    if family_handle:
+    # delivered as parent_family_handle too: the client's person/family
+    # graph needs to know WHICH family object the parents form
+    parent_family_handle = person.get_main_parents_family_handle() or None
+    if parent_family_handle:
         try:
-            family = db.get_family_from_handle(family_handle)
+            family = db.get_family_from_handle(parent_family_handle)
             for parent_handle in (family.get_father_handle(),
                                   family.get_mother_handle()):
                 if parent_handle:
@@ -341,5 +343,6 @@ def person_detail(db, handle):
         "names": names,
         "events": events,
         "parents": parents,
+        "parent_family_handle": parent_family_handle,
         "families": families,
     }

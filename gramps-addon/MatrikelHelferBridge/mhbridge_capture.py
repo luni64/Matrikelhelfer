@@ -20,10 +20,11 @@ import logging
 
 from gramps.gen.db import DbTxn
 from gramps.gen.display.name import displayer as name_displayer
-from gramps.gen.lib import (Citation, Date, Event, EventRef, EventRoleType,
-                            EventType, Note, NoteType, RepoRef, Repository,
+from gramps.gen.lib import (ChildRef, Citation, Date, Event, EventRef,
+                            EventRoleType, EventType, Family, Name, Note,
+                            NoteType, Person, RepoRef, Repository,
                             RepositoryType, Source, SourceMediaType,
-                            SrcAttribute, Url, UrlType)
+                            SrcAttribute, Surname, Url, UrlType)
 
 LOG = logging.getLogger("MatrikelHelferBridge")
 
@@ -278,9 +279,216 @@ def _resolve_source(db, block, repository_handle, trans, counters):
     return _source_brief(source, False), source
 
 
+# -- create_person (spec 7.3 v2: series of finds for missing persons) --
+
+_GENDERS = {"M": Person.MALE, "F": Person.FEMALE, "U": Person.UNKNOWN}
+
+_PERSON_LINKS = ("child_of_family", "child_of_person", "spouse_of",
+                 "parent_of")
+
+
+def _fill_partner_slot(family, person, gender_code):
+    """Put person into the family's free father/mother slot by gender;
+    unknown gender takes whichever slot is empty. Occupied -> 400."""
+    if gender_code == "M" or (gender_code == "U"
+                              and not family.get_father_handle()):
+        if family.get_father_handle():
+            raise InvalidPayload("family already has a father/partner")
+        family.set_father_handle(person.get_handle())
+    else:
+        if family.get_mother_handle():
+            raise InvalidPayload("family already has a mother/partner")
+        family.set_mother_handle(person.get_handle())
+
+
+def _add_child(db, family, person, trans):
+    ref = ChildRef()
+    ref.set_reference_handle(person.get_handle())
+    family.add_child_ref(ref)
+    db.commit_family(family, trans)
+    person.add_parent_family_handle(family.get_handle())
+    db.commit_person(person, trans)
+
+
+def _new_family(db, trans, counters):
+    family = Family()
+    db.add_family(family, trans)
+    counters["created"] += 1
+    return family
+
+
+def build_person_object(db, spec, trans, counters):
+    """Bare person from given/surname/gender — shared by create_person
+    and the batch endpoint (which links separately)."""
+    given = (spec.get("given") or "").strip()
+    surname_text = (spec.get("surname") or "").strip()
+    if not given and not surname_text:
+        raise InvalidPayload("person needs 'given' and/or 'surname'")
+    gender_code = spec.get("gender") or "U"
+    if gender_code not in _GENDERS:
+        raise InvalidPayload("person: gender must be M, F or U")
+
+    person = Person()
+    person.set_gender(_GENDERS[gender_code])
+    name = Name()
+    if given:
+        name.set_first_name(given)
+    if surname_text:
+        surname = Surname()
+        surname.set_surname(surname_text)
+        name.add_surname(surname)
+    person.set_primary_name(name)
+    db.add_person(person, trans)
+    counters["created"] += 1
+    return person
+
+
+def _create_person(db, spec, trans, counters):
+    """Create a person and link them as child/spouse/parent.
+
+    Returns (person, created_family_or_None). Exactly one link kind is
+    required - a person floating outside the tree structure is never
+    what the walkable-tree workflow means.
+    """
+    links = [key for key in _PERSON_LINKS if spec.get(key)]
+    if len(links) != 1:
+        raise InvalidPayload("create_person needs exactly one of %s"
+                             % ", ".join(_PERSON_LINKS))
+    person = build_person_object(db, spec, trans, counters)
+    gender_code = spec.get("gender") or "U"
+
+    created_family = None
+    kind = links[0]
+    if kind == "child_of_family":
+        family = db.get_family_from_handle(spec["child_of_family"])
+        _add_child(db, family, person, trans)
+    elif kind == "child_of_person":
+        # single known parent, no family object yet -> create one
+        parent = db.get_person_from_handle(spec["child_of_person"])
+        family = _new_family(db, trans, counters)
+        created_family = family
+        _fill_partner_slot(family, parent,
+                           {Person.MALE: "M", Person.FEMALE: "F"}
+                           .get(parent.get_gender(), "U"))
+        parent.add_family_handle(family.get_handle())
+        db.commit_person(parent, trans)
+        _add_child(db, family, person, trans)
+    elif kind == "spouse_of":
+        partner = db.get_person_from_handle(spec["spouse_of"])
+        family_handle = spec.get("family_handle")
+        if family_handle:
+            # join an existing partner-less family (partner + children)
+            family = db.get_family_from_handle(family_handle)
+            _fill_partner_slot(family, person, gender_code)
+            db.commit_family(family, trans)
+        else:
+            family = _new_family(db, trans, counters)
+            created_family = family
+            _fill_partner_slot(family, person, gender_code)
+            _fill_partner_slot(family, partner,
+                               {Person.MALE: "M", Person.FEMALE: "F"}
+                               .get(partner.get_gender(), "U"))
+            db.commit_family(family, trans)
+            partner.add_family_handle(family.get_handle())
+            db.commit_person(partner, trans)
+        person.add_family_handle(family.get_handle())
+        db.commit_person(person, trans)
+    else:  # parent_of
+        child = db.get_person_from_handle(spec["parent_of"])
+        family_handle = (spec.get("family_handle")
+                         or child.get_main_parents_family_handle())
+        if family_handle:
+            family = db.get_family_from_handle(family_handle)
+            _fill_partner_slot(family, person, gender_code)
+            db.commit_family(family, trans)
+            person.add_family_handle(family.get_handle())
+            db.commit_person(person, trans)
+        else:
+            family = _new_family(db, trans, counters)
+            created_family = family
+            _fill_partner_slot(family, person, gender_code)
+            person.add_family_handle(family.get_handle())
+            db.commit_person(person, trans)
+            _add_child(db, family, child, trans)
+
+    return person, created_family
+
+
+def build_citation(db, citation_block, source, trans, counters):
+    """Citation object incl. notes, attached to the source — shared by
+    /capture and /capture-batch."""
+    citation = Citation()
+    citation.set_reference_handle(source.get_handle())
+    if citation_block.get("page"):
+        citation.set_page(citation_block["page"])
+    date = build_date(citation_block.get("date"))
+    if date is not None:
+        citation.set_date_object(date)
+    confidence = citation_block.get("confidence") or "normal"
+    if confidence not in _CONFIDENCE:
+        raise InvalidPayload("unknown confidence '%s'" % confidence)
+    citation.set_confidence_level(_CONFIDENCE[confidence])
+    _add_attributes(citation, citation_block.get("attributes"), "citation")
+
+    note_briefs = []
+    for note_spec in citation_block.get("notes") or []:
+        text = note_spec.get("text")
+        if not text:
+            raise InvalidPayload("note needs 'text'")
+        note = Note()
+        note.set(text)
+        note.set_type(_set_type(NoteType(), note_spec.get("type")))
+        db.add_note(note, trans)
+        counters["created"] += 1
+        citation.add_note(note.get_handle())
+        note_briefs.append({"handle": note.get_handle(),
+                            "gramps_id": note.get_gramps_id()})
+
+    db.add_citation(citation, trans)
+    counters["created"] += 1
+    return citation, note_briefs
+
+
+def apply_person_url(db, trans, spec, url_recipients):
+    """Permalink onto the involved persons' Internet tab (5.7) — shared
+    by /capture and /capture-batch. One Internet row PER EVENT: the
+    description carries the event label, so the dedup key is
+    path+description - the same scan may legitimately appear on several
+    rows (one record backs marriage, residence, occupation, ...), but
+    re-capturing the same event never piles up duplicates."""
+    path = spec.get("path")
+    if not path:
+        raise InvalidPayload("person_url needs 'path'")
+    url_results = []
+    description = spec.get("description") or ""
+    for handle in dict.fromkeys(url_recipients):  # dedup, keep order
+        person = db.get_person_from_handle(handle)
+        entry = {"handle": handle,
+                 "gramps_id": person.get_gramps_id(),
+                 "name": name_displayer.display(person)}
+        if any(u.get_path() == path
+               and u.get_description() == description
+               for u in person.get_url_list()):
+            url_results.append(entry | {"was_existing": True})
+            continue
+        url = Url()
+        url.set_path(path)
+        url.set_description(description)
+        url.set_type(_set_type(UrlType(), spec.get("type") or "Digitalisat"))
+        person.add_url(url)
+        db.commit_person(person, trans)
+        url_results.append(entry | {"was_existing": False})
+    return url_results
+
+
 # -- the capture itself ----------------------------------------------
 
 def _transaction_label(payload):
+    if payload.get("citation") is None and payload.get("create_person"):
+        spec = payload["create_person"]
+        name = " ".join(part for part in (spec.get("given"),
+                                          spec.get("surname")) if part)
+        return ("MatrikelHelfer: Person %s" % (name or "?"))[:100]
     source_block = payload.get("source") or {}
     title = ((source_block.get("create_if_missing") or {}).get("title")
              or (source_block.get("match") or {}).get("value") or "Quelle")
@@ -292,15 +500,27 @@ def _transaction_label(payload):
 
 
 def do_capture(db, payload):
-    """Execute spec 5.7. Returns (response, created_object_count)."""
-    if not isinstance(payload.get("citation"), dict):
-        raise InvalidPayload("'citation' block is required")
-    citation_block = payload["citation"]
-    if "urls" in citation_block:
+    """Execute spec 5.7. Returns (response, created_object_count).
+
+    The citation block is optional since create_person exists: a bare
+    person creation carries no evidence to attach. Without a citation,
+    targets are meaningless and rejected; a created event then simply
+    has no citation.
+    """
+    citation_block = payload.get("citation")
+    if citation_block is not None and not isinstance(citation_block, dict):
+        raise InvalidPayload("'citation' must be an object")
+    if citation_block is None and not payload.get("create_person") \
+            and not payload.get("create_event_if_missing"):
+        raise InvalidPayload("'citation' block is required (it may only be "
+                             "omitted for create_person/create_event)")
+    if citation_block is not None and "urls" in citation_block:
         raise InvalidPayload("citation.urls is not representable in Gramps "
                              "(Citation has no URL list); put the permalink "
                              "into an attribute or a note")
     targets = payload.get("targets") or []
+    if targets and citation_block is None:
+        raise InvalidPayload("targets given but no citation block")
     for target in targets:
         if not isinstance(target, dict) or not target.get("handle"):
             raise InvalidPayload("each target needs 'type' and 'handle'")
@@ -311,42 +531,29 @@ def do_capture(db, payload):
     label = _transaction_label(payload)
 
     with DbTxn(label, db) as trans:
-        created["repository"], repository_handle = _resolve_repository(
-            db, payload.get("repository"), trans, counters)
-        created["source"], source = _resolve_source(
-            db, payload.get("source"), repository_handle, trans, counters)
+        citation = None
+        if citation_block is not None:
+            created["repository"], repository_handle = _resolve_repository(
+                db, payload.get("repository"), trans, counters)
+            created["source"], source = _resolve_source(
+                db, payload.get("source"), repository_handle, trans, counters)
+            citation, note_briefs = build_citation(
+                db, citation_block, source, trans, counters)
+            created["citation"] = _brief(citation, False)
+            created["notes"] = note_briefs
 
-        citation = Citation()
-        citation.set_reference_handle(source.get_handle())
-        if citation_block.get("page"):
-            citation.set_page(citation_block["page"])
-        date = build_date(citation_block.get("date"))
-        if date is not None:
-            citation.set_date_object(date)
-        confidence = citation_block.get("confidence") or "normal"
-        if confidence not in _CONFIDENCE:
-            raise InvalidPayload("unknown confidence '%s'" % confidence)
-        citation.set_confidence_level(_CONFIDENCE[confidence])
-        _add_attributes(citation, citation_block.get("attributes"), "citation")
-
-        note_briefs = []
-        for note_spec in citation_block.get("notes") or []:
-            text = note_spec.get("text")
-            if not text:
-                raise InvalidPayload("note needs 'text'")
-            note = Note()
-            note.set(text)
-            note.set_type(_set_type(NoteType(), note_spec.get("type")))
-            db.add_note(note, trans)
-            counters["created"] += 1
-            citation.add_note(note.get_handle())
-            note_briefs.append({"handle": note.get_handle(),
-                                "gramps_id": note.get_gramps_id()})
-
-        db.add_citation(citation, trans)
-        counters["created"] += 1
-        created["citation"] = _brief(citation, False)
-        created["notes"] = note_briefs
+        # spec 7.3 v2: person + family link (+ event + citation below) in
+        # the same transaction; "@new" in create_event refers to these
+        new_person = new_person_family = None
+        person_spec = payload.get("create_person")
+        if person_spec:
+            if not isinstance(person_spec, dict):
+                raise InvalidPayload("'create_person' must be an object")
+            new_person, new_person_family = _create_person(
+                db, person_spec, trans, counters)
+            created["person"] = _brief(new_person, False)
+            if new_person_family is not None:
+                created["family"] = _brief(new_person_family, False)
 
         url_recipients = []     # persons who get the permalink (5.7 person_url)
 
@@ -378,6 +585,18 @@ def do_capture(db, payload):
                     "create_event_if_missing needs exactly one of "
                     "person_handle or family_handle (family events "
                     "like Marriage belong on the family)")
+            # "@new" = the person/family just made by create_person
+            if person_handle == "@new":
+                if new_person is None:
+                    raise InvalidPayload("person_handle '@new' needs a "
+                                         "create_person block")
+                person_handle = new_person.get_handle()
+            if family_handle == "@new":
+                if new_person_family is None:
+                    raise InvalidPayload("family_handle '@new' needs a "
+                                         "create_person that created a "
+                                         "family (spouse_of/parent_of)")
+                family_handle = new_person_family.get_handle()
             if person_handle:
                 owner = db.get_person_from_handle(person_handle)
                 default_role = "Primary"
@@ -397,7 +616,8 @@ def do_capture(db, payload):
                 event.set_place_handle(event_spec["place_handle"])
             if event_spec.get("description"):
                 event.set_description(event_spec["description"])
-            event.add_citation(citation.get_handle())
+            if citation is not None:
+                event.add_citation(citation.get_handle())
             db.add_event(event, trans)
             counters["created"] += 1
             created["event"] = _brief(event, False)
@@ -420,35 +640,8 @@ def do_capture(db, payload):
 
         person_url = payload.get("person_url")
         if person_url:
-            path = person_url.get("path")
-            if not path:
-                raise InvalidPayload("person_url needs 'path'")
-            url_results = []
-            description = person_url.get("description") or ""
-            for handle in dict.fromkeys(url_recipients):  # dedup, keep order
-                person = db.get_person_from_handle(handle)
-                entry = {"handle": handle,
-                         "gramps_id": person.get_gramps_id(),
-                         "name": name_displayer.display(person)}
-                # one Internet row PER EVENT: the description carries the
-                # event label, so the dedup key is path+description - the
-                # same scan may legitimately appear on several rows (one
-                # record backs marriage, residence, occupation, ...), but
-                # re-capturing the same event never piles up duplicates
-                if any(u.get_path() == path
-                       and u.get_description() == description
-                       for u in person.get_url_list()):
-                    url_results.append(entry | {"was_existing": True})
-                    continue
-                url = Url()
-                url.set_path(path)
-                url.set_description(description)
-                url.set_type(_set_type(UrlType(),
-                                       person_url.get("type") or "Digitalisat"))
-                person.add_url(url)
-                db.commit_person(person, trans)
-                url_results.append(entry | {"was_existing": False})
-            created["person_urls"] = url_results
+            created["person_urls"] = apply_person_url(
+                db, trans, person_url, url_recipients)
 
     response = {
         "request_id": payload.get("request_id"),
