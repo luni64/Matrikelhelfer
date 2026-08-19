@@ -490,7 +490,26 @@ class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        var picker = new BrowserPickerWindow(_connection.ListRunningBrowsers())
+        var browsers = _connection.ListRunningBrowsers();
+
+        // The overwhelmingly common case is exactly one running browser -
+        // connect straight away instead of showing a one-entry chooser.
+        // The dialog only appears when there is an actual choice to make.
+        if (browsers.Count == 1)
+        {
+            _connection.Connect(browsers[0]);
+            SetConnectedStatus();
+            CommandManager.InvalidateRequerySuggested();
+            return;
+        }
+        if (browsers.Count == 0)
+        {
+            StatusText = "Kein laufender Browser gefunden – bitte Browser starten.";
+            CommandManager.InvalidateRequerySuggested();
+            return;
+        }
+
+        var picker = new BrowserPickerWindow(browsers)
         {
             Owner = System.Windows.Application.Current.MainWindow
         };

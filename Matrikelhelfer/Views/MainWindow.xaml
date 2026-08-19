@@ -169,132 +169,178 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <!-- Top bar: export buttons, matching the main panel's top-row
-                 circle buttons in size and vertical position. The heading
-                 moved into the card below, mirroring the left-hand section
-                 cards (heading inside the card). CSV is rightmost; BibTeX
-                 docks to its left. -->
-            <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,8">
-                <Button DockPanel.Dock="Right" Style="{DynamicResource MahApps.Styles.Button.Circle}"
-                        Width="40" Height="40" Padding="0"
-                        Command="{Binding ExportEntriesCommand}"
-                        ToolTip="Einträge als CSV exportieren">
-                    <iconPacks:PackIconFontAwesome6 Width="18" Height="18" Kind="FileExportSolid" />
-                </Button>
-                <Button DockPanel.Dock="Right" Style="{DynamicResource MahApps.Styles.Button.Circle}"
-                        Width="40" Height="40" Padding="0" Margin="0,0,8,0"
-                        Command="{Binding ExportBibTexCommand}"
-                        ToolTip="Als BibTeX-Bibliothek (.bib) exportieren">
-                    <iconPacks:PackIconFontAwesome6 Width="18" Height="18" Kind="AtSolid" />
-                </Button>
-            </DockPanel>
-            <!-- Invisible sizer: stretches to fill the star row, so its
-                 ActualHeight is exactly the height available to the card.
-                 The card's MaxHeight tracks it, so the cap follows the
-                 window without any magic pixel constants (binding to the
-                 whole panel's height instead overshoots by the top bar and
-                 pushes the grid's scrollbar off-screen). -->
-            <Border x:Name="EntriesRowSizer" Grid.Row="1" IsHitTestVisible="False" />
+            <!-- Spacer mirroring the left side's vertical structure (button
+                 row + its 8 margin + tab-header strip + the tab content's 8
+                 top margin), so the tray card's top edge lines up with the
+                 Notizen card - bound to the REAL element heights, no magic
+                 pixel constants. A TabItem element IS its header chip, so
+                 its ActualHeight is exactly the header-strip height. -->
+            <StackPanel Grid.Row="0" IsHitTestVisible="False">
+                <Border Height="{Binding ActualHeight, ElementName=TopButtonRow}" />
+                <Border Height="8" />
+                <Border Height="{Binding ActualHeight, ElementName=ZitateTabItem}" />
+                <Border Height="8" />
+            </StackPanel>
 
-            <!-- List card: same look as the left-hand section cards (heading
-                 inside, Gray9 surface, matching 12px padding). VerticalAlignment=Top
-                 lets the card hug the actual entries instead of filling the
-                 column; MaxHeight caps it at the available height, and the
-                 DataGrid (DockPanel fill below the heading) scrolls once the
-                 list outgrows that. -->
-            <Border Grid.Row="1" VerticalAlignment="Top"
-                    MaxHeight="{Binding ActualHeight, ElementName=EntriesRowSizer}"
+            <!-- Tray card: same look as the left-hand section cards, but
+                 filling the whole remaining height - the card list scrolls
+                 inside, the export/clear band sits at the card bottom. -->
+            <Border Grid.Row="1"
                     Background="{DynamicResource MahApps.Brushes.Gray9}"
                     CornerRadius="6" Padding="12">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Top" Text="Gespeicherte Einträge"
                            Style="{StaticResource SectionHeadingStyle}" />
-                <!-- "Alle löschen" docked at the card bottom (below the list).
-                     Bulk delete is guarded by a confirmation dialog in the VM.
-                     Must precede the fill DataGrid so it docks below it. -->
-                <Button DockPanel.Dock="Bottom" HorizontalAlignment="Right" Margin="0,8,0,0"
-                        Command="{Binding ClearAllEntriesCommand}"
-                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                        ToolTip="Alle gespeicherten Einträge löschen">
-                    <StackPanel Orientation="Horizontal">
-                        <iconPacks:PackIconFontAwesome6 Kind="TrashCanSolid" Width="12" Height="12"
-                                                        VerticalAlignment="Center" Foreground="Firebrick" />
-                        <TextBlock Text="Alle löschen" Margin="6,0,0,0"
-                                   VerticalAlignment="Center" Foreground="Firebrick" />
-                    </StackPanel>
-                </Button>
-            <DataGrid x:Name="EntriesGrid"
-                      Background="Transparent" BorderThickness="0"
-                      ItemsSource="{Binding SavedEntries}"
-                      SelectedItem="{Binding SelectedSavedEntry, Mode=TwoWay}"
-                      AutoGenerateColumns="False" IsReadOnly="True"
-                      SelectionMode="Single" SelectionUnit="FullRow"
-                      GridLinesVisibility="Horizontal" HeadersVisibility="Column"
-                      MouseDoubleClick="EntriesGrid_MouseDoubleClick"
-                      PreviewMouseRightButtonDown="EntriesGrid_PreviewMouseRightButtonDown">
-                <DataGrid.InputBindings>
+                <!-- Bottom band: exports left, guarded bulk delete right.
+                     Must precede the fill ListBox so it docks below it. -->
+                <DockPanel DockPanel.Dock="Bottom" LastChildFill="False" Margin="0,8,0,0">
+                    <Button DockPanel.Dock="Left" Margin="0,0,10,0"
+                            Command="{Binding ExportBibTexCommand}"
+                            Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                            ToolTip="Als BibTeX-Bibliothek (.bib) exportieren">
+                        <iconPacks:PackIconFontAwesome6 Kind="AtSolid" Width="15" Height="15" />
+                    </Button>
+                    <Button DockPanel.Dock="Left"
+                            Command="{Binding ExportEntriesCommand}"
+                            Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                            ToolTip="Einträge als CSV exportieren">
+                        <iconPacks:PackIconFontAwesome6 Kind="FileExportSolid" Width="15" Height="15" />
+                    </Button>
+                    <Button DockPanel.Dock="Right"
+                            Command="{Binding ClearAllEntriesCommand}"
+                            Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                            ToolTip="Alle gespeicherten Einträge löschen">
+                        <StackPanel Orientation="Horizontal">
+                            <iconPacks:PackIconFontAwesome6 Kind="TrashCanSolid" Width="12" Height="12"
+                                                            VerticalAlignment="Center" Foreground="Firebrick" />
+                            <TextBlock Text="Alle löschen" Margin="6,0,0,0"
+                                       VerticalAlignment="Center" Foreground="Firebrick" />
+                        </StackPanel>
+                    </Button>
+                </DockPanel>
+            <!-- The tray: saved finds as CARDS (the same visual unit the
+                 Gramps tab will use as source-citation cards). Replaces the
+                 earlier DataGrid: with the short-term-storage model there is
+                 nothing to sort by columns - newest first, fixed. Single
+                 click redisplays (Zitate tab), double-click drives the
+                 browser to the scan, x deletes without selecting. -->
+            <ListBox x:Name="EntriesList"
+                     Background="Transparent" BorderThickness="0"
+                     ItemsSource="{Binding SavedEntries}"
+                     SelectedItem="{Binding SelectedSavedEntry, Mode=TwoWay}"
+                     HorizontalContentAlignment="Stretch"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     VirtualizingPanel.ScrollUnit="Pixel"
+                     MouseDoubleClick="EntriesList_MouseDoubleClick"
+                     PreviewMouseRightButtonDown="EntriesList_PreviewMouseRightButtonDown">
+                <ListBox.InputBindings>
                     <KeyBinding Key="Delete" Command="{Binding DeleteEntryCommand}" />
-                </DataGrid.InputBindings>
-                <DataGrid.ContextMenu>
+                </ListBox.InputBindings>
+                <ListBox.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="Im Browser öffnen" Command="{Binding NavigateToEntryCommand}" />
                         <MenuItem Header="Eintrag löschen" Command="{Binding DeleteEntryCommand}" />
                     </ContextMenu>
-                </DataGrid.ContextMenu>
-                <DataGrid.RowStyle>
-                    <!-- The comment is shown as a row tooltip instead of a
-                         column - too long for the panel. -->
-                    <Style TargetType="DataGridRow" BasedOn="{StaticResource MahApps.Styles.DataGridRow}">
+                </ListBox.ContextMenu>
+                <ListBox.ItemContainerStyle>
+                    <!-- Card chrome lives on the CONTAINER so selection can
+                         restyle the border; the comment stays a tooltip (too
+                         long for the card). -->
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Margin" Value="0,0,0,6" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                         <Setter Property="ToolTip" Value="{Binding Comment}" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Card"
+                                            Background="{DynamicResource MahApps.Brushes.ThemeBackground}"
+                                            BorderBrush="{DynamicResource MahApps.Brushes.Gray7}"
+                                            BorderThickness="1.5" CornerRadius="6"
+                                            Padding="10,7">
+                                        <ContentPresenter />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Card" Property="BorderBrush"
+                                                    Value="{DynamicResource MahApps.Brushes.Gray5}" />
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Card" Property="BorderBrush"
+                                                    Value="{DynamicResource MahApps.Brushes.Accent}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding Comment}" Value="">
                                 <Setter Property="ToolTip" Value="{x:Null}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>
-                </DataGrid.RowStyle>
-                <!-- All columns Width="Auto": each sizes to its content (like
-                     double-clicking the column dividers) and re-fits as
-                     entries are added, instead of the star columns stretching
-                     to fill the now-wider panel. -->
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="Auto" />
-                    <DataGridTextColumn Header="Buch" Binding="{Binding Info.CitationTitle}" Width="Auto" />
-                    <DataGridTextColumn Header="Seite" Binding="{Binding Info.PageDescription}" Width="Auto" />
-                    <DataGridTextColumn Header="Gespeichert" Width="Auto" SortDirection="Descending"
-                                        Binding="{Binding SavedAt, StringFormat='{}{0:dd.MM.yyyy}'}" />
-                    <!-- Inline delete: a trash button that appears only while
-                         its row is hovered (Visibility=Hidden keeps the
-                         column width stable so rows don't shift). It deletes
-                         THIS row via CommandParameter, so no prior selection
-                         is needed; clicking a button inside a cell doesn't
-                         change the row selection either. -->
-                    <DataGridTemplateColumn CanUserResize="False" CanUserSort="False">
-                        <DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate>
-                                <Button CommandParameter="{Binding}"
-                                        Command="{Binding DataContext.DeleteEntryCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                        Width="24" Height="24" Padding="0"
-                                        ToolTip="Eintrag löschen">
-                                    <Button.Style>
-                                        <Style TargetType="Button" BasedOn="{StaticResource MahApps.Styles.Button.Chromeless}">
-                                            <Setter Property="Visibility" Value="Hidden" />
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <!-- Name is the find's identity - collapsed
+                                     when (yet) empty rather than showing a
+                                     blank bold line. -->
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
                                             <Style.Triggers>
-                                                <DataTrigger Value="True"
-                                                             Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=DataGridRow}}">
-                                                    <Setter Property="Visibility" Value="Visible" />
+                                                <DataTrigger Binding="{Binding Name}" Value="">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
-                                    </Button.Style>
-                                    <iconPacks:PackIconFontAwesome6 Kind="TrashCanSolid" Width="13" Height="13"
-                                                                    Foreground="Firebrick" />
-                                </Button>
-                            </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                </DataGrid.Columns>
-            </DataGrid>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock Text="{Binding Info.CitationTitle}"
+                                           FontSize="11.5" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource MahApps.Brushes.Gray3}" />
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" FontSize="11"
+                                               Foreground="{DynamicResource MahApps.Brushes.Gray5}"
+                                               VerticalAlignment="Bottom" Margin="6,0,0,0"
+                                               Text="{Binding SavedAt, StringFormat='{}{0:dd.MM.yy}'}" />
+                                    <TextBlock Text="{Binding Info.PageDescription}"
+                                               FontSize="11.5" TextTrimming="CharacterEllipsis" />
+                                </DockPanel>
+                            </StackPanel>
+                            <!-- x appears only while its card is hovered
+                                 (Hidden keeps the layout stable); deletes THIS
+                                 card via CommandParameter, no selection needed. -->
+                            <Button Grid.Column="1" VerticalAlignment="Top" Margin="6,0,0,0"
+                                    CommandParameter="{Binding}"
+                                    Command="{Binding DataContext.DeleteEntryCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                    Width="20" Height="20" Padding="0"
+                                    ToolTip="Eintrag löschen">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource MahApps.Styles.Button.Chromeless}">
+                                        <Setter Property="Visibility" Value="Hidden" />
+                                        <Style.Triggers>
+                                            <DataTrigger Value="True"
+                                                         Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                                <iconPacks:PackIconFontAwesome6 Kind="XmarkSolid" Width="12" Height="12"
+                                                                Foreground="Firebrick" />
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
             </DockPanel>
             </Border>
         </Grid>
@@ -309,12 +355,14 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Workflow buttons, left to right in usage order: connect, read.
-             Speichern sits on the right next to the list toggle - saving
-             and reviewing saved entries belong together. -->
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
+        <!-- Workflow buttons: connect on the left; the work verbs on the
+             right - Lesen, Speichern, list toggle - so read and save sit
+             next to each other. Named so the tray spacer can mirror this
+             row's height (see EntriesPanel). -->
+        <StackPanel x:Name="TopButtonRow" Orientation="Horizontal"
+                    HorizontalAlignment="Left" Margin="0,0,0,8">
             <Button Style="{DynamicResource MahApps.Styles.Button.Circle}"
-                Width="40" Height="40" Padding="0" Margin="0,0,8,0"
+                Width="40" Height="40" Padding="0"
                 Command="{Binding ToggleConnectionCommand}"
                 ToolTip="{Binding ConnectionStatusText}">
                 <iconPacks:PackIconFontAwesome6 Width="25" Height="25" Kind="PlugSolid">
@@ -330,10 +378,13 @@
                     </iconPacks:PackIconFontAwesome6.Style>
                 </iconPacks:PackIconFontAwesome6>
             </Button>
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,8">
             <!-- Lesen is the primary action - filled accent so it stands
                  out from the neutral circle buttons around it. -->
             <Button Style="{DynamicResource MahApps.Styles.Button.Circle}"
-                Width="40" Height="40" Padding="0"
+                Width="40" Height="40" Padding="0" Margin="0,0,8,0"
                 Background="{DynamicResource MahApps.Brushes.Accent}"
                 Foreground="White"
                 Command="{Binding ReadCommand}"
@@ -341,9 +392,6 @@
                 <iconPacks:PackIconFontAwesome6 Width="22" Height="22" Kind="BookOpenReaderSolid"
                                                 Foreground="White" />
             </Button>
-        </StackPanel>
-
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,8">
             <Button Style="{DynamicResource MahApps.Styles.Button.Circle}"
                 Width="40" Height="40" Padding="0" Margin="0,0,8,0"
                 Command="{Binding SaveCommand}"
@@ -358,12 +406,21 @@
             </Button>
         </StackPanel>
 
+        <!-- Two work modes, one window: "Zitate" is the classic copy/paste
+             citation view, "Gramps" will host the Gramps-Modus (walkable
+             tree + assignment view; connection follows in the next stage).
+             The saved-finds tray to the right sits OUTSIDE the tabs and
+             serves both. -->
+        <TabControl Grid.Row="1" Background="Transparent" BorderThickness="0"
+                    mah:TabControlHelper.Underlined="SelectedTabItem">
+        <TabItem x:Name="ZitateTabItem" Header="Zitate"
+                 mah:HeaderedControlHelper.HeaderFontSize="16">
         <!-- Right padding is added ONLY while the scrollbar is actually
              visible (trigger below), giving the cards a small gap to the
              scrollbar. With no scrollbar the padding is 0, so the left/right
              gaps stay symmetric (the button row above has no scrollbar inset
              to match a constant padding). -->
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+        <ScrollViewer Margin="0,8,0,0" VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled">
             <ScrollViewer.Style>
                 <Style TargetType="ScrollViewer">
@@ -534,6 +591,22 @@
             </Border>
         </StackPanel>
         </ScrollViewer>
+        </TabItem>
+
+        <!-- Placeholder until the bridge connection lands (stage 2) and the
+             Gramps-Modus view is ported (stage 3). -->
+        <TabItem Header="Gramps" mah:HeaderedControlHelper.HeaderFontSize="16">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
+                        Opacity="0.55" Margin="20">
+                <iconPacks:PackIconFontAwesome6 Kind="PeopleRoofSolid"
+                        Width="48" Height="48" HorizontalAlignment="Center"
+                        Foreground="{DynamicResource MahApps.Brushes.Gray3}" />
+                <TextBlock Margin="0,14,0,0" TextAlignment="Center" TextWrapping="Wrap"
+                           MaxWidth="360"
+                           Text="Gramps-Modus: Funde direkt in einen laufenden Gramps-Stammbaum übernehmen — ohne Import/Export. Die Verbindung zur MatrikelHelfer Bridge folgt im nächsten Schritt." />
+            </StackPanel>
+        </TabItem>
+        </TabControl>
         </Grid>
     </Grid>
 </mah:MetroWindow>

@@ -15,10 +15,12 @@ public partial class MainWindow : MetroWindow
     readonly MainViewModel _viewModel = new();
     bool _entriesPanelShown;
 
-    // Width the docked saved-entries panel gets when opened; the window
+    // Width the docked saved-finds tray gets when opened; the window
     // widens/narrows by the same amount so the main fields never resize.
     // Mutable: the GridSplitter's drag result is remembered across toggles.
-    double _entriesPanelWidth = 750;
+    // Cards stack vertically, so the tray is much narrower than the old
+    // DataGrid was.
+    double _entriesPanelWidth = 340;
 
     public MainWindow()
     {
@@ -37,10 +39,9 @@ public partial class MainWindow : MetroWindow
             ?? "?";
         Title = $"Matrikelhelfer v{version}";
 
-        // Newest first by default; the SortDirection on the "Gespeichert"
-        // column only draws the header arrow - the actual sort needs a
-        // SortDescription. Header clicks replace it as usual.
-        EntriesGrid.Items.SortDescriptions.Add(
+        // Newest first - fixed order for the card tray (the old DataGrid's
+        // column sorting went away with the columns).
+        EntriesList.Items.SortDescriptions.Add(
             new SortDescription("SavedAt", ListSortDirection.Descending));
     }
 
@@ -126,20 +127,20 @@ public partial class MainWindow : MetroWindow
 
     // Selection alone only redisplays the entry (see MainViewModel) -
     // double-click is the explicit "take my browser there".
-    void EntriesGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    void EntriesList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         _viewModel.NavigateToSelectedEntry();
     }
 
-    // A right-click doesn't select DataGrid rows on its own - without this,
-    // the context menu would act on whatever row was selected BEFORE.
-    void EntriesGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    // A right-click doesn't select ListBox items on its own - without this,
+    // the context menu would act on whatever card was selected BEFORE.
+    void EntriesList_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.OriginalSource is System.Windows.DependencyObject source &&
-            System.Windows.Controls.ItemsControl.ContainerFromElement(EntriesGrid, source)
-                is System.Windows.Controls.DataGridRow row)
+            System.Windows.Controls.ItemsControl.ContainerFromElement(EntriesList, source)
+                is System.Windows.Controls.ListBoxItem item)
         {
-            row.IsSelected = true;
+            item.IsSelected = true;
         }
     }
 }

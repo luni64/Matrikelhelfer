@@ -12,6 +12,8 @@ MatrikelHelfer ist eine C#/.NET-Anwendung zur Erfassung genealogischer Quellenzi
 
 Dieses Dokument beschreibt die dafür erforderliche Komponente: ein **Gramps-Addon (Python)**, das innerhalb des Gramps-Prozesses einen lokalen HTTP-Endpunkt bereitstellt, über den MatrikelHelfer den Stammbaum lesen und Quellen/Zitate schreiben kann.
 
+**Ausblick weitere Backends (2026-08-20):** Gramps ist das *erste* angebundene Genealogieprogramm, nicht zwingend das einzige. Das Datenmodell des Clients (Person/Familie/Ereignis/Quelle/Zitat, Baumgraph, Änderungsliste) ist das GEDCOM-Modell und damit programmneutral; die Erweiterung erfolgt später wahlweise über (a) eine weitere Bridge, die **dasselbe HTTP-Protokoll** implementiert (z. B. als Plugin für erweiterbare Software), oder (b) einen clientseitigen Adapter hinter einer dann zu extrahierenden Backend-Schnittstelle. Dafür werden bei der Integration in MatrikelHelfer alle Bridge-Zugriffe in **einer** Adapterklasse gebündelt; die Schnittstelle selbst wird bewusst erst extrahiert, wenn ein zweites Backend konkret wird. Software ohne Schreib-API (Ancestry) bleibt außen vor (§2.2, Browser-Extension-Weg).
+
 ### 1.1 Warum diese Architektur
 
 Untersuchte und verworfene Alternativen:
