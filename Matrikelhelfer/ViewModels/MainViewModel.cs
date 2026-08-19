@@ -300,6 +300,11 @@ class MainViewModel : INotifyPropertyChanged
     // multi-backend interface line (see spec §1 and ARCHITECTURE.md).
     readonly GrampsBackend _gramps = new();
 
+    // The Gramps-Modus view (stage 3): tree, link view, change list.
+    // Shares the library so tray cards can be adopted, and reports its
+    // status through the common status bar.
+    public GrampsViewModel Gramps { get; }
+
     string _grampsStatusText =
         "Nicht verbunden – Gramps mit dem MatrikelHelfer-Bridge-Addon starten.";
     public string GrampsStatusText
@@ -365,6 +370,19 @@ class MainViewModel : INotifyPropertyChanged
         var result = await _gramps.ConnectAsync();
         GrampsStatusText = result.Message;
         RefreshGrampsIndicator();
+        Gramps.OnConnectionChanged();
+    }
+
+    /// <summary>Tray card double-clicked (Gramps tab) or via context
+    /// menu: adopt the finding into the centered person's working set.</summary>
+    public void AdoptSelectedIntoGramps()
+    {
+        if (SelectedSavedEntry is null)
+        {
+            return;
+        }
+        SelectedTabIndex = GrampsTabIndex;
+        Gramps.AdoptFinding(SelectedSavedEntry);
     }
 
     void RefreshGrampsIndicator()
@@ -401,6 +419,7 @@ class MainViewModel : INotifyPropertyChanged
     public ICommand ToggleEntriesPanelCommand { get; }
     public ICommand DeleteEntryCommand { get; }
     public ICommand NavigateToEntryCommand { get; }
+    public ICommand AdoptIntoGrampsCommand { get; }
     public ICommand ExportEntriesCommand { get; }
     public ICommand ExportBibTexCommand { get; }
     public ICommand ClearAllEntriesCommand { get; }
@@ -462,6 +481,9 @@ class MainViewModel : INotifyPropertyChanged
             entry => DeleteEntry(entry ?? SelectedSavedEntry),
             entry => (entry ?? SelectedSavedEntry) != null);
         NavigateToEntryCommand = new RelayCommand(NavigateToSelectedEntry, () => SelectedSavedEntry != null);
+        AdoptIntoGrampsCommand = new RelayCommand(AdoptSelectedIntoGramps,
+            () => SelectedSavedEntry != null);
+        Gramps = new GrampsViewModel(_gramps, SavedEntries, s => StatusText = s);
         ExportEntriesCommand = new RelayCommand(ExportEntries, () => SavedEntries.Count > 0);
         ExportBibTexCommand = new RelayCommand(ExportBibTex, () => SavedEntries.Count > 0);
         ClearAllEntriesCommand = new RelayCommand(ClearAllEntries, () => SavedEntries.Count > 0);

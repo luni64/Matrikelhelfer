@@ -125,11 +125,57 @@ public partial class MainWindow : MetroWindow
         EntriesColumn.Width = new GridLength(1, GridUnitType.Star);
     }
 
-    // Selection alone only redisplays the entry (see MainViewModel) -
-    // double-click is the explicit "take my browser there".
+    // Selection alone only redisplays the entry (see MainViewModel).
+    // Double-click depends on the mode: Zitate tab = "take my browser
+    // there"; Gramps tab = adopt the find into the centered person's
+    // working set.
     void EntriesList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        _viewModel.NavigateToSelectedEntry();
+        if (_viewModel.SelectedTabIndex == 1)
+        {
+            _viewModel.AdoptSelectedIntoGramps();
+        }
+        else
+        {
+            _viewModel.NavigateToSelectedEntry();
+        }
+    }
+
+    // Tray cards are drag sources for the Gramps view's sources column
+    // (adopt-by-drag). The movement threshold keeps ordinary clicks and
+    // selection untouched.
+    System.Windows.Point _trayDragStart;
+    ViewModels.SavedEntry? _trayDragEntry;
+
+    void EntriesList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _trayDragStart = e.GetPosition(null);
+        _trayDragEntry =
+            e.OriginalSource is System.Windows.DependencyObject source &&
+            System.Windows.Controls.ItemsControl.ContainerFromElement(EntriesList, source)
+                is System.Windows.Controls.ListBoxItem item
+            ? item.DataContext as ViewModels.SavedEntry
+            : null;
+    }
+
+    void EntriesList_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_trayDragEntry is null ||
+            e.LeftButton != System.Windows.Input.MouseButtonState.Pressed)
+        {
+            return;
+        }
+        var position = e.GetPosition(null);
+        if (Math.Abs(position.X - _trayDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(position.Y - _trayDragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+        var entry = _trayDragEntry;
+        _trayDragEntry = null;
+        System.Windows.DragDrop.DoDragDrop(EntriesList,
+            new System.Windows.DataObject(GrampsModeView.FindingDataFormat, entry),
+            System.Windows.DragDropEffects.Link);
     }
 
     // A right-click doesn't select ListBox items on its own - without this,

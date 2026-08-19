@@ -478,7 +478,7 @@ Analog kann ein `MH_CitationKey` (abgeleitet aus Quellschlüssel plus Seite/Eint
 
 ### 7.3 Gramps-Modus: UI-Konzept (Stand der Diskussion 2026-08-17)
 
-Ist MatrikelHelfer mit der Bridge verbunden („Gramps-Modus"), ersetzt diese Ansicht das Speichern-Flyout:
+**Umsetzungsstand 2026-08-20: Der Gramps-Modus ist in MatrikelHelfer selbst umgesetzt** — als eigener Reiter „Gramps“ neben „Zitate“ (nicht mehr als Ersatz des Speichern-Flyouts; das Hauptfenster wurde auf Reiter umgestellt). Funde liegen in der gemeinsamen **„Ablage“** (Kartenliste rechts, beide Reiter) und werden per Ziehen/Doppelklick der zentrierten Person zugeordnet; Änderungslisten-Einträge referenzieren den gespeicherten Fund per ID, die Zitat-Daten werden beim Upload aus dem aktuellen Fund-Stand aufgebaut. Der Reiter ist eine feste ~500px-Spalte (Suche / Baum / Zuordnungsansicht 75 % / Änderungsliste 25 %), Boxen kompakt mit intelligenter Namenskürzung. Der `GrampsBridgeTester` bleibt eingefroren als Bridge-/API-Testwerkzeug. Ursprüngliches Konzept:
 
 ![UI-Entwurf Gramps-Modus](images/gramps-mode-ui-draft.png)
 

@@ -103,6 +103,28 @@ class GrampsBackend
         AddonVersion = null;
         SessionId = null;
     }
+
+    // ---- data calls (stage 3: the Gramps-Modus view) ----------------
+    // Thin pass-throughs on purpose: the adapter's job today is to be
+    // the ONE place backend calls flow through; DTO neutralization
+    // happens if/when the interface gets extracted for a second backend.
+
+    BridgeClient Client() => _client
+        ?? throw new InvalidOperationException("Nicht mit Gramps verbunden.");
+
+    public Task<PersonSearchResponse> SearchPersonsAsync(
+        string? q, int? birthYearFrom, int? birthYearTo) =>
+        Client().SearchPersonsAsync(q: q, birthYearFrom: birthYearFrom,
+                                    birthYearTo: birthYearTo);
+
+    public Task<PersonDetail> GetPersonAsync(string handle) =>
+        Client().GetPersonAsync(handle);
+
+    public Task<EventTypeCatalog> GetEventTypesAsync() =>
+        Client().GetEventTypesAsync();
+
+    public Task<BatchResponse> CaptureBatchAsync(BatchRequest request) =>
+        Client().CaptureBatchAsync(request);
 }
 
 class GrampsConnectResult

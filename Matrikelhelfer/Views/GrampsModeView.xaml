@@ -1,0 +1,552 @@
+<UserControl x:Class="Matrikelhelfer.Views.GrampsModeView"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
+        xmlns:iconPacks="http://metro.mahapps.com/winfx/xaml/iconpacks"
+        xmlns:vm="clr-namespace:Matrikelhelfer.ViewModels">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <!-- One tree box; identity-stable, updated in place. Fixed widths
+             (no content-driven sizing); the whole box clicks: real person
+             navigates, "Neu" slot creates a virtual person. Small boxes
+             (parents/children) are strict two-liners: name + life span
+             ("*1800" / "+1880" / "1800–1880"); the couple boxes keep the
+             two full life lines. Everything else lives in the tooltip;
+             the pending badge sits in the corner. -->
+        <DataTemplate x:Key="PersonBox" DataType="{x:Type vm:PersonBoxVM}">
+            <Border x:Name="Box" Margin="3,2" Padding="5,1" CornerRadius="8"
+                    Background="{DynamicResource MahApps.Brushes.ThemeBackground}"
+                    BorderBrush="{DynamicResource MahApps.Brushes.Gray5}"
+                    BorderThickness="1.3"
+                    Width="104" Height="40" Cursor="Hand"
+                    ToolTip="{Binding ToolTipText}">
+                <Border.InputBindings>
+                    <MouseBinding Gesture="LeftClick"
+                                  Command="{Binding DataContext.NavigateCommand,
+                                            RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                  CommandParameter="{Binding}" />
+                </Border.InputBindings>
+                <Grid>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="NameLine" Text="{Binding Name}"
+                                   FontWeight="Bold" FontSize="11"
+                                   TextTrimming="CharacterEllipsis" TextAlignment="Center" />
+                        <TextBlock x:Name="SpanLine" Text="{Binding SpanText}"
+                                   FontSize="9.5" Foreground="{DynamicResource MahApps.Brushes.Gray3}"
+                                   TextTrimming="CharacterEllipsis" TextAlignment="Center" />
+                        <TextBlock x:Name="BirthLine" Text="{Binding BirthText}"
+                                   FontSize="10.5" Foreground="{DynamicResource MahApps.Brushes.Gray3}"
+                                   TextTrimming="CharacterEllipsis" TextAlignment="Center"
+                                   Visibility="Collapsed" />
+                        <TextBlock x:Name="DeathLine" Text="{Binding DeathText}"
+                                   FontSize="10.5" Foreground="{DynamicResource MahApps.Brushes.Gray3}"
+                                   TextTrimming="CharacterEllipsis" TextAlignment="Center"
+                                   Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBlock x:Name="BadgeLine" Text="{Binding Badges}"
+                               FontSize="9" Foreground="#B36B00"
+                               HorizontalAlignment="Right" VerticalAlignment="Top"
+                               Margin="0,0,2,0" />
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsLarge}" Value="True">
+                    <Setter TargetName="Box" Property="Width" Value="160" />
+                    <Setter TargetName="Box" Property="Height" Value="60" />
+                    <Setter TargetName="NameLine" Property="FontSize" Value="13" />
+                    <Setter TargetName="SpanLine" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="BirthLine" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="DeathLine" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsCenter}" Value="True">
+                    <Setter TargetName="Box" Property="BorderBrush"
+                            Value="{DynamicResource MahApps.Brushes.Accent}" />
+                    <Setter TargetName="Box" Property="BorderThickness" Value="2.4" />
+                    <Setter TargetName="NameLine" Property="Foreground"
+                            Value="{DynamicResource MahApps.Brushes.Accent}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsVirtual}" Value="True">
+                    <Setter TargetName="Box" Property="BorderBrush"
+                            Value="{DynamicResource MahApps.Brushes.Accent}" />
+                    <Setter TargetName="Box" Property="Background"
+                            Value="{DynamicResource MahApps.Brushes.Accent4}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                    <Setter TargetName="Box" Property="BorderBrush"
+                            Value="{DynamicResource MahApps.Brushes.Gray7}" />
+                    <Setter TargetName="Box" Property="Background"
+                            Value="{DynamicResource MahApps.Brushes.Gray10}" />
+                    <Setter TargetName="Box" Property="ToolTip"
+                            Value="Neue Person in diesem Platz anlegen" />
+                    <Setter TargetName="NameLine" Property="Foreground"
+                            Value="{DynamicResource MahApps.Brushes.Gray5}" />
+                    <Setter TargetName="SpanLine" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="BirthLine" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="DeathLine" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="BadgeLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <ItemsPanelTemplate x:Key="HorizontalPanel">
+            <StackPanel Orientation="Horizontal" />
+        </ItemsPanelTemplate>
+
+        <Style x:Key="Rings" TargetType="TextBlock">
+            <Setter Property="Text" Value="⚭" />
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="Foreground" Value="{DynamicResource MahApps.Brushes.Gray3}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="-2,0" />
+        </Style>
+
+        <!-- One event card, styled and sized like the source cards: line 1
+             = event name, line 2 = date + place (no parentheses). Click
+             selects (lines), double click enters assign mode, click while
+             a CARD is the assign subject toggles the link. -->
+        <DataTemplate x:Key="FactRowTemplate" DataType="{x:Type vm:FactRowVM}">
+            <Border x:Name="FactRow"
+                    Background="{DynamicResource MahApps.Brushes.ThemeBackground}"
+                    BorderBrush="{DynamicResource MahApps.Brushes.Gray6}"
+                    BorderThickness="1.3" CornerRadius="6" Padding="8,5"
+                    Margin="0,3" Cursor="Hand">
+                <Border.InputBindings>
+                    <MouseBinding Gesture="LeftClick"
+                                  Command="{Binding DataContext.SelectFactCommand,
+                                            RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                  CommandParameter="{Binding}" />
+                    <MouseBinding Gesture="LeftDoubleClick"
+                                  Command="{Binding DataContext.AssignFactCommand,
+                                            RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                  CommandParameter="{Binding}" />
+                </Border.InputBindings>
+                <DockPanel>
+                    <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
+                              Margin="0,0,6,0" IsHitTestVisible="False"
+                              Focusable="False"
+                              Visibility="{Binding ShowCheckBox,
+                                           Converter={StaticResource BoolToVisibility}}"
+                              IsChecked="{Binding IsChecked, Mode=OneWay}"
+                              IsEnabled="{Binding IsCheckEnabled}" />
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right"
+                                       Text="{Binding Badges}" Foreground="#B36B00"
+                                       FontSize="10" VerticalAlignment="Center"
+                                       Margin="4,0,0,0" />
+                            <TextBlock x:Name="FactLabel" Text="{Binding EventName}"
+                                       FontSize="12" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" x:Name="ZitCount"
+                                       Foreground="{DynamicResource MahApps.Brushes.Gray4}"
+                                       FontSize="10.5" VerticalAlignment="Center"
+                                       Margin="4,0,0,0"
+                                       Text="{Binding CitationCount, StringFormat='Zit. {0}'}" />
+                            <TextBlock Text="{Binding DetailLine}" FontSize="11"
+                                       Foreground="{DynamicResource MahApps.Brushes.Gray3}"
+                                       TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding CitationCount}" Value="0">
+                    <Setter TargetName="ZitCount" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsPendingNew}" Value="True">
+                    <Setter TargetName="FactRow" Property="Background"
+                            Value="{DynamicResource MahApps.Brushes.Accent4}" />
+                    <Setter TargetName="FactLabel" Property="FontStyle" Value="Italic" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="FactRow" Property="BorderBrush"
+                            Value="{DynamicResource MahApps.Brushes.Accent}" />
+                    <Setter TargetName="FactRow" Property="BorderThickness" Value="2.2" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsAssignSubject}" Value="True">
+                    <Setter TargetName="FactRow" Property="BorderBrush"
+                            Value="{DynamicResource MahApps.Brushes.Accent}" />
+                    <Setter TargetName="FactRow" Property="BorderThickness" Value="2.6" />
+                </DataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsChecked}" Value="True" />
+                        <Condition Binding="{Binding IsCheckEnabled}" Value="False" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter TargetName="FactRow" Property="ToolTip"
+                            Value="Bereits in Gramps verknüpft — Lösen ist über die Bridge bewusst nicht möglich" />
+                </MultiDataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- One source/citation card; adopted finding cards ("Neuer Fund"
+             from the tray) share the interaction model. -->
+        <DataTemplate x:Key="SourceCardTemplate" DataType="{x:Type vm:SourceCardVM}">
+            <Border x:Name="Card"
+                    Background="{DynamicResource MahApps.Brushes.ThemeBackground}"
+                    BorderBrush="{DynamicResource MahApps.Brushes.Gray6}"
+                    BorderThickness="1.3" CornerRadius="6" Padding="8,5"
+                    Margin="0,3" Cursor="Hand"
+                    ToolTip="{Binding ToolTipText}">
+                <Border.InputBindings>
+                    <MouseBinding Gesture="LeftClick"
+                                  Command="{Binding DataContext.SelectCardCommand,
+                                            RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                  CommandParameter="{Binding}" />
+                    <MouseBinding Gesture="LeftDoubleClick"
+                                  Command="{Binding DataContext.AssignCardCommand,
+                                            RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                  CommandParameter="{Binding}" />
+                </Border.InputBindings>
+                <DockPanel>
+                    <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
+                              Margin="0,0,6,0" IsHitTestVisible="False"
+                              Focusable="False"
+                              Visibility="{Binding ShowCheckBox,
+                                           Converter={StaticResource BoolToVisibility}}"
+                              IsChecked="{Binding IsChecked, Mode=OneWay}"
+                              IsEnabled="{Binding IsCheckEnabled}" />
+                    <StackPanel>
+                        <TextBlock Text="{Binding Title}" FontSize="12"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="SubtitleLine" Text="{Binding Subtitle}"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource MahApps.Brushes.Gray3}"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="PageLine" Text="{Binding Page}"
+                                   FontSize="11"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Subtitle}" Value="">
+                    <Setter TargetName="SubtitleLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Page}" Value="">
+                    <Setter TargetName="PageLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <!-- adopted finding cards keep the accent tint as their
+                     "new" marker - no extra tag line -->
+                <DataTrigger Binding="{Binding IsFinding}" Value="True">
+                    <Setter TargetName="Card" Property="Background"
+                            Value="{DynamicResource MahApps.Brushes.Accent4}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="Card" Property="BorderBrush"
+                            Value="{DynamicResource MahApps.Brushes.Accent}" />
+                    <Setter TargetName="Card" Property="BorderThickness" Value="2.2" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsAssignSubject}" Value="True">
+                    <Setter TargetName="Card" Property="BorderBrush"
+                            Value="{DynamicResource MahApps.Brushes.Accent}" />
+                    <Setter TargetName="Card" Property="BorderThickness" Value="2.6" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid Margin="0,8,0,0">
+        <!-- Single column (discussion 2026-08-20): tree at its natural
+             box height, the remaining vertical space split 75% link view
+             (facts|sources) / 25% change list - the side column disturbed
+             the view. -->
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="3*" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- search: name + rough birth year, e.g. "Meier 1780". Fixed
+             width, aligned with the tree/panels column. The magnifier
+             button lives INSIDE the box (MahApps TextBox.Button style);
+             the first hit is centered immediately, the combo switches
+             between further hits. -->
+        <DockPanel Grid.Row="0" Width="500" HorizontalAlignment="Left"
+                   Margin="0,0,0,6">
+            <ComboBox DockPanel.Dock="Right" Width="240" Margin="8,0,0,0"
+                      ItemsSource="{Binding SearchResults}"
+                      SelectedItem="{Binding SelectedResult}"
+                      ToolTip="Suchtreffer – Auswahl zentriert die Person">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock TextTrimming="CharacterEllipsis">
+                            <Run Text="{Binding PrimaryName, Mode=OneWay}" FontWeight="Bold" />
+                            <Run Text="{Binding Birth.DateText, Mode=OneWay}" />
+                        </TextBlock>
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+            <TextBox Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}"
+                     VerticalContentAlignment="Center"
+                     Style="{DynamicResource MahApps.Styles.TextBox.Button}"
+                     mah:TextBoxHelper.Watermark="Person suchen: Name und ungefähres Jahr, z. B. „Meier 1780“"
+                     mah:TextBoxHelper.ButtonCommand="{Binding SearchCommand}">
+                <mah:TextBoxHelper.ButtonContent>
+                    <iconPacks:PackIconFontAwesome6 Kind="MagnifyingGlassSolid"
+                                                    Width="12" Height="12" />
+                </mah:TextBoxHelper.ButtonContent>
+                <TextBox.InputBindings>
+                    <KeyBinding Key="Return" Command="{Binding SearchCommand}" />
+                </TextBox.InputBindings>
+            </TextBox>
+        </DockPanel>
+
+        <!-- walkable tree: FIXED width (a wider window just adds white
+             space, a narrower one clips the card) - reactive resizing
+             produced stacked scrollbars and jumpy layout. Height = the
+             natural height of the boxes. -->
+        <Border Grid.Row="1" Width="500" HorizontalAlignment="Left"
+                Background="{DynamicResource MahApps.Brushes.Gray9}"
+                CornerRadius="6" Padding="10">
+                <!-- left-aligned like the panel lists below, so every
+                     panel shares the same left inset -->
+                <StackPanel HorizontalAlignment="Left">
+                    <Grid x:Name="TreeGrid" HorizontalAlignment="Left">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0"
+                                    Orientation="Horizontal" HorizontalAlignment="Right">
+                            <ContentControl Content="{Binding LeftParentsRow[0]}"
+                                            ContentTemplate="{StaticResource PersonBox}" />
+                            <TextBlock Style="{StaticResource Rings}" />
+                            <ContentControl Content="{Binding LeftParentsRow[1]}"
+                                            ContentTemplate="{StaticResource PersonBox}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="0" Grid.Column="2"
+                                    Orientation="Horizontal" HorizontalAlignment="Left">
+                            <ContentControl Content="{Binding RightParentsRow[0]}"
+                                            ContentTemplate="{StaticResource PersonBox}" />
+                            <TextBlock Style="{StaticResource Rings}" />
+                            <ContentControl Content="{Binding RightParentsRow[1]}"
+                                            ContentTemplate="{StaticResource PersonBox}" />
+                        </StackPanel>
+
+                        <ContentControl Grid.Row="1" Grid.Column="0"
+                                        Content="{Binding LeftBox}"
+                                        ContentTemplate="{StaticResource PersonBox}"
+                                        HorizontalAlignment="Right" Margin="0,6,0,0" />
+                        <TextBlock Grid.Row="1" Grid.Column="1"
+                                   Style="{StaticResource Rings}" Margin="-2,6,-2,0" />
+                        <ContentControl Grid.Row="1" Grid.Column="2"
+                                        Content="{Binding RightBox}"
+                                        ContentTemplate="{StaticResource PersonBox}"
+                                        HorizontalAlignment="Left" Margin="0,6,0,0" />
+                    </Grid>
+
+                    <ComboBox Width="230" HorizontalAlignment="Center" Margin="0,4,0,0"
+                              ItemsSource="{Binding Families}"
+                              SelectedItem="{Binding SelectedFamily}"
+                              DisplayMemberPath="Display"
+                              ToolTip="Familie wählen (bei mehreren Ehen)"
+                              Visibility="{Binding HasMultipleFamilies,
+                                           Converter={StaticResource BoolToVisibility}}" />
+
+                    <!-- children page with chevrons instead of a scrollbar;
+                         both appear only when the row actually overflows -->
+                    <DockPanel Width="{Binding ActualWidth, ElementName=TreeGrid}"
+                               HorizontalAlignment="Left" Margin="0,6,0,0">
+                        <Button x:Name="ChildLeft" DockPanel.Dock="Left" Width="16"
+                                Padding="0" VerticalAlignment="Center"
+                                Visibility="Collapsed"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                Click="ChildLeft_Click">
+                            <iconPacks:PackIconFontAwesome6 Kind="ChevronLeftSolid"
+                                    Width="10" Height="10" />
+                        </Button>
+                        <Button x:Name="ChildRight" DockPanel.Dock="Right" Width="16"
+                                Padding="0" VerticalAlignment="Center"
+                                Visibility="Collapsed"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                Click="ChildRight_Click">
+                            <iconPacks:PackIconFontAwesome6 Kind="ChevronRightSolid"
+                                    Width="10" Height="10" />
+                        </Button>
+                        <ScrollViewer x:Name="ChildrenScroll"
+                                      HorizontalScrollBarVisibility="Hidden"
+                                      VerticalScrollBarVisibility="Disabled"
+                                      ScrollChanged="ChildrenScroll_ScrollChanged">
+                            <ItemsControl ItemsSource="{Binding ChildrenRow}"
+                                          ItemTemplate="{StaticResource PersonBox}"
+                                          ItemsPanel="{StaticResource HorizontalPanel}"
+                                          HorizontalAlignment="Left" />
+                        </ScrollViewer>
+                    </DockPanel>
+                </StackPanel>
+        </Border>
+
+        <!-- assign-mode bar -->
+        <DockPanel Grid.Row="2" Margin="0,8,0,0"
+                   Visibility="{Binding InAssignMode,
+                                Converter={StaticResource BoolToVisibility}}">
+            <Button DockPanel.Dock="Right" Content="Fertig" Padding="10,3"
+                    Command="{Binding EndAssignCommand}" Margin="6,0,0,0" />
+            <Border Background="{DynamicResource MahApps.Brushes.Accent4}"
+                    CornerRadius="4" Padding="8,4">
+                <TextBlock Text="{Binding AssignHint}" FontWeight="SemiBold"
+                           Foreground="{DynamicResource MahApps.Brushes.Accent}"
+                           TextTrimming="CharacterEllipsis" />
+            </Border>
+        </DockPanel>
+
+        <!-- events | connector gutter | sources (Ancestry-style). Both
+             panels stretch down to the change list and align with the
+             tree card's fixed width; the LISTS scroll inside, with the
+             vertical scrollbar always shown so a growing list never
+             shifts the layout. The sources column is the drop target
+             for tray cards. -->
+        <Grid x:Name="LinkArea" Grid.Row="3" Margin="0,8,0,0"
+              HorizontalAlignment="Left">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="230" />
+                <ColumnDefinition Width="40" />
+                <ColumnDefinition Width="230" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="{DynamicResource MahApps.Brushes.Gray9}"
+                    CornerRadius="6" Padding="10">
+                <DockPanel>
+                    <!-- add-event as a small icon button in the panel
+                         title instead of a clunky text button below -->
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <Button DockPanel.Dock="Right" Width="20" Height="20" Padding="0"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                Command="{Binding AddEventCommand}"
+                                ToolTip="Ereignis vormerken — öffnet die Ereignistyp-Auswahl (Liste aus Gramps); der vorgemerkte Eintrag erscheint als (neu)-Karte und ist Zuordnungsziel">
+                            <iconPacks:PackIconFontAwesome6 Kind="PlusSolid"
+                                    Width="12" Height="12"
+                                    Foreground="{DynamicResource MahApps.Brushes.Accent}" />
+                        </Button>
+                        <TextBlock Text="Fakten und Ereignisse"
+                                   FontWeight="SemiBold" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource MahApps.Brushes.Accent}" />
+                    </DockPanel>
+                    <ScrollViewer x:Name="FactsScroll"
+                                  VerticalScrollBarVisibility="Visible"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  ScrollChanged="LinkList_ScrollChanged">
+                        <ItemsControl x:Name="FactsList"
+                                      ItemsSource="{Binding Facts}"
+                                      ItemTemplate="{StaticResource FactRowTemplate}"
+                                      Margin="0,0,4,0" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Column="2"
+                    Background="{DynamicResource MahApps.Brushes.Gray9}"
+                    CornerRadius="6" Padding="10"
+                    AllowDrop="True" DragOver="Sources_DragOver"
+                    Drop="Sources_Drop">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Quellen und Zitate"
+                               FontWeight="SemiBold" Margin="0,0,0,4"
+                               Foreground="{DynamicResource MahApps.Brushes.Accent}" />
+                    <TextBlock DockPanel.Dock="Bottom"
+                               Text="Funde aus der Ablage hierher ziehen"
+                               FontSize="10.5" TextWrapping="Wrap"
+                               Foreground="{DynamicResource MahApps.Brushes.Gray4}"
+                               Margin="0,4,0,0" />
+                    <ScrollViewer x:Name="CardsScroll"
+                                  VerticalScrollBarVisibility="Visible"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  ScrollChanged="LinkList_ScrollChanged">
+                        <ItemsControl x:Name="CardsList"
+                                      ItemsSource="{Binding SourceCards}"
+                                      ItemTemplate="{StaticResource SourceCardTemplate}"
+                                      Margin="0,0,4,0" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <Canvas x:Name="LinkCanvas" Grid.ColumnSpan="3"
+                    IsHitTestVisible="False" ClipToBounds="True" />
+        </Grid>
+
+        <!-- change list, 25% of the remaining height, same fixed width
+             as everything above; the upload button sits in its header
+             so no extra row is spent -->
+        <Border Grid.Row="4" Width="500" HorizontalAlignment="Left"
+                Margin="0,8,0,0"
+                Background="{DynamicResource MahApps.Brushes.Gray9}"
+                CornerRadius="6" Padding="10">
+            <DockPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <Button DockPanel.Dock="Right" Content="An Gramps senden"
+                            FontWeight="SemiBold" Padding="10,2"
+                            Command="{Binding SendCommand}"
+                            ToolTip="Alle Änderungen in EINER Gramps-Transaktion ausführen (ein Undo in Gramps macht alles rückgängig)" />
+                    <TextBlock Text="Änderungsliste" FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource MahApps.Brushes.Accent}" />
+                </DockPanel>
+                <TreeView ItemsSource="{Binding ChangeTree}" BorderThickness="0"
+                          Background="Transparent">
+                    <TreeView.ItemContainerStyle>
+                        <Style TargetType="TreeViewItem"
+                               BasedOn="{StaticResource MahApps.Styles.TreeViewItem}">
+                            <Setter Property="IsExpanded" Value="True" />
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+                    <TreeView.Resources>
+                        <HierarchicalDataTemplate DataType="{x:Type vm:GrampsChangeGroupVM}"
+                                                  ItemsSource="{Binding Children}">
+                            <DockPanel Margin="0,1">
+                                <Button DockPanel.Dock="Right" Padding="3,0"
+                                        Margin="6,0,0,0"
+                                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                        ToolTip="Alle Änderungen zu dieser Person/Familie entfernen"
+                                        Command="{Binding DataContext.DeleteGroupCommand,
+                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}">
+                                    <iconPacks:PackIconFontAwesome6 Kind="TrashCanSolid"
+                                            Width="11" Height="11" Foreground="Firebrick" />
+                                </Button>
+                                <TextBlock Text="{Binding EntityLabel}" FontWeight="Bold"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
+                        </HierarchicalDataTemplate>
+                        <HierarchicalDataTemplate DataType="{x:Type vm:GrampsChangeNodeVM}"
+                                                  ItemsSource="{Binding Children}">
+                            <DockPanel Margin="0,1">
+                                <Button DockPanel.Dock="Right" Padding="3,0"
+                                        Margin="6,0,0,0"
+                                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                        ToolTip="Diese Änderung entfernen (abhängige werden mit entfernt)"
+                                        Command="{Binding DataContext.DeleteEntryCommand,
+                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding Entry}">
+                                    <iconPacks:PackIconFontAwesome6 Kind="TrashCanSolid"
+                                            Width="10" Height="10" Foreground="Firebrick" />
+                                </Button>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Entry.DisplayText}"
+                                               TextWrapping="Wrap" FontSize="12" />
+                                    <TextBlock Text="{Binding Entry.Error}" Foreground="Firebrick"
+                                               FontSize="11" TextWrapping="Wrap"
+                                               Visibility="{Binding Entry.HasError,
+                                                            Converter={StaticResource BoolToVisibility}}" />
+                                </StackPanel>
+                            </DockPanel>
+                        </HierarchicalDataTemplate>
+                    </TreeView.Resources>
+                </TreeView>
+            </DockPanel>
+        </Border>
+    </Grid>
+</UserControl>

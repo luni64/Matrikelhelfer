@@ -220,7 +220,7 @@
                     Background="{DynamicResource MahApps.Brushes.Gray9}"
                     CornerRadius="6" Padding="12">
             <DockPanel>
-                <TextBlock DockPanel.Dock="Top" Text="Gespeicherte Einträge"
+                <TextBlock DockPanel.Dock="Top" Text="Ablage"
                            Style="{StaticResource SectionHeadingStyle}" />
                 <!-- Bottom band: exports left, guarded bulk delete right.
                      Must precede the fill ListBox so it docks below it. -->
@@ -263,13 +263,16 @@
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      VirtualizingPanel.ScrollUnit="Pixel"
                      MouseDoubleClick="EntriesList_MouseDoubleClick"
-                     PreviewMouseRightButtonDown="EntriesList_PreviewMouseRightButtonDown">
+                     PreviewMouseRightButtonDown="EntriesList_PreviewMouseRightButtonDown"
+                     PreviewMouseLeftButtonDown="EntriesList_PreviewMouseLeftButtonDown"
+                     PreviewMouseMove="EntriesList_PreviewMouseMove">
                 <ListBox.InputBindings>
                     <KeyBinding Key="Delete" Command="{Binding DeleteEntryCommand}" />
                 </ListBox.InputBindings>
                 <ListBox.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="Im Browser öffnen" Command="{Binding NavigateToEntryCommand}" />
+                        <MenuItem Header="In Gramps-Ansicht übernehmen" Command="{Binding AdoptIntoGrampsCommand}" />
                         <MenuItem Header="Eintrag löschen" Command="{Binding DeleteEntryCommand}" />
                     </ContextMenu>
                 </ListBox.ContextMenu>
@@ -432,7 +435,7 @@
             <Button Style="{DynamicResource MahApps.Styles.Button.Circle}"
                 Width="40" Height="40" Padding="0"
                 Command="{Binding ToggleEntriesPanelCommand}"
-                ToolTip="Gespeicherte Einträge anzeigen">
+                ToolTip="Ablage anzeigen (gespeicherte Funde)">
                 <iconPacks:PackIconFontAwesome6 Width="22" Height="22" Kind="ListSolid" />
             </Button>
         </StackPanel>
@@ -625,19 +628,12 @@
         </ScrollViewer>
         </TabItem>
 
-        <!-- Placeholder; the Gramps-Modus view (tree, assignment, upload)
-             is ported in stage 3. Opening this tab auto-connects to the
-             bridge; the connection state lives in the status bar. -->
+        <!-- The Gramps-Modus view (stage 3): search + walkable tree +
+             event<->source link view + change list. Opening this tab
+             auto-connects to the bridge; the connection state lives in
+             the status bar. -->
         <TabItem Header="Gramps" mah:HeaderedControlHelper.HeaderFontSize="16">
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center"
-                        Opacity="0.55" Margin="20">
-                <iconPacks:PackIconFontAwesome6 Kind="PeopleRoofSolid"
-                        Width="48" Height="48" HorizontalAlignment="Center"
-                        Foreground="{DynamicResource MahApps.Brushes.Gray3}" />
-                <TextBlock Margin="0,14,0,0" TextAlignment="Center" TextWrapping="Wrap"
-                           MaxWidth="360"
-                           Text="Gramps-Modus: Funde direkt in einen laufenden Gramps-Stammbaum übernehmen — ohne Import/Export. Der begehbare Stammbaum mit der Zuordnungsansicht folgt im nächsten Schritt." />
-            </StackPanel>
+            <views:GrampsModeView DataContext="{Binding Gramps}" />
         </TabItem>
         </TabControl>
         </Grid>
