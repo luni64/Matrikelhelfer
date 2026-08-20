@@ -27,6 +27,7 @@ sealed class GrampsViewModel : GrampsObservable
     readonly GrampsBackend _backend;
     readonly ObservableCollection<SavedEntry> _library;
     readonly Action<string> _setStatus;
+    readonly Func<SavedEntry, SavedEntry?> _editCitation;
 
     readonly TreeGraph _graph = new();
     TreePerson? _centerNode;
@@ -34,13 +35,21 @@ sealed class GrampsViewModel : GrampsObservable
     string? _lastSessionId;
     bool _suppressFamilyReload;
 
+    // editCitation = MainViewModel.EditCitation, the ONE citation-edit flow
+    // (dialog + library commit + refresh) shared by the tray and the source
+    // cards here - the library's owner keeps the identity/merge rules and
+    // calls back OnFindingCitationChanged for the Gramps-side refresh. Its
+    // return value is the entry now carrying the dialog's values (a NEW one
+    // after "Als Kopie speichern"), so a copy can be adopted right away.
     public GrampsViewModel(GrampsBackend backend,
                            ObservableCollection<SavedEntry> library,
-                           Action<string> setStatus)
+                           Action<string> setStatus,
+                           Func<SavedEntry, SavedEntry?> editCitation)
     {
         _backend = backend;
         _library = library;
         _setStatus = setStatus;
+        _editCitation = editCitation;
         SearchCommand = new RelayCommand(async void () => await SearchAsync(),
             () => _backend.IsConnected && _backend.TreeOpen);
         NavigateCommand = new RelayCommand<PersonBoxVM>(box =>
@@ -61,6 +70,12 @@ sealed class GrampsViewModel : GrampsObservable
             () => _backend.IsConnected && Changes.Count > 0);
         DeleteEntryCommand = new RelayCommand<GrampsChangeEntry>(e => { if (e is not null) DeleteEntry(e); });
         DeleteGroupCommand = new RelayCommand<GrampsChangeGroupVM>(g => { if (g is not null) DeleteGroup(g); });
+        EditPersonCommand = new RelayCommand<PersonBoxVM>(b => { if (b is not null) EditVirtualPerson(b); });
+        RemovePersonCommand = new RelayCommand<PersonBoxVM>(b => { if (b is not null) RemoveVirtualPerson(b); });
+        EditEventCommand = new RelayCommand<FactRowVM>(f => { if (f is not null) EditPendingEvent(f); });
+        RemoveEventCommand = new RelayCommand<FactRowVM>(f => { if (f is not null) RemovePendingEvent(f); });
+        EditCitationCommand = new RelayCommand<SourceCardVM>(c => { if (c is not null) EditFindingCitation(c); });
+        UnadoptCommand = new RelayCommand<SourceCardVM>(c => { if (c is not null) UnadoptFinding(c); });
     }
 
     void Status(string text) => _setStatus(text);
@@ -299,7 +314,6 @@ sealed class GrampsViewModel : GrampsObservable
     {
         RebuildRows();
         SyncFacts();
-        RecomputeBadges();
         RefreshLinkView();
     }
 
@@ -446,13 +460,6 @@ sealed class GrampsViewModel : GrampsObservable
         }
     }
 
-    IEnumerable<PersonBoxVM> AllBoxes()
-    {
-        IEnumerable<PersonBoxVM?> boxes =
-            [Center, Spouse, .. LeftParentsRow, .. RightParentsRow, .. ChildrenRow];
-        return boxes.Where(b => b is { IsPlaceholder: false })!;
-    }
-
     // ---- virtual persons (click a "Neu" box) -------------------------
 
     async void BoxClicked(PersonBoxVM box)
@@ -585,6 +592,77 @@ sealed class GrampsViewModel : GrampsObservable
         : person.DisplayName.Contains(' ')
             ? person.DisplayName[(person.DisplayName.LastIndexOf(' ') + 1)..]
             : "";
+
+    // ---- editing/removing PENDING items (pre-upload only) -------------
+    // Real Gramps persons/events stay read-only here: the bridge has no
+    // update API by design - they are edited in Gramps itself.
+
+    public ICommand EditPersonCommand { get; }
+    public ICommand RemovePersonCommand { get; }
+
+    /// <summary>Edits a not-yet-uploaded virtual person (name/gender)
+    /// via the NewPersonDialog in edit mode.</summary>
+    void EditVirtualPerson(PersonBoxVM box)
+    {
+        if (_graph.Person(box.Id) is not { IsVirtual: true } node
+            || Changes.FirstOrDefault(c => c.Id == node.EntryId)
+                is not { } entry)
+        {
+            return;
+        }
+        string context = "Neue Person bearbeiten"
+            + (entry.RoleLabel is { Length: > 0 } role ? $" ({role})" : "");
+        var dialog = new NewPersonDialog(context, node.Given, node.Surname,
+                                         node.Gender, edit: true)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        node.Given = dialog.Given;
+        node.Surname = dialog.Surname;
+        if (node.Gender != dialog.Gender)
+        {
+            node.Gender = dialog.Gender;
+            // re-place into the father/mother slot the new gender implies
+            foreach (var family in node.Families)
+            {
+                if (family.Father == node)
+                {
+                    family.Father = null;
+                }
+                if (family.Mother == node)
+                {
+                    family.Mother = null;
+                }
+                TreeGraph.PlacePartner(family, node);
+            }
+        }
+        entry.NewGiven = dialog.Given;
+        entry.NewSurname = dialog.Surname;
+        entry.NewGender = dialog.Gender;
+        // dependent entries (events on / citations for this person) carry
+        // the person's label too - their EntityKey is this entry's id
+        string label = "Neu: " + node.DisplayName;
+        foreach (var carrier in Changes.Where(c => c.EntityKey == entry.Id))
+        {
+            carrier.EntityLabel = label;
+        }
+        AfterChangesMutation($"Person {node.DisplayName} geändert");
+    }
+
+    /// <summary>Box-side twin of the change list's delete: removes the
+    /// CreatePerson entry (same cascade confirmation for dependents).</summary>
+    void RemoveVirtualPerson(PersonBoxVM box)
+    {
+        if (_graph.Person(box.Id) is { IsVirtual: true } node
+            && Changes.FirstOrDefault(c => c.Id == node.EntryId) is { } entry)
+        {
+            DeleteEntry(entry);
+        }
+    }
 
     // ---- adopted findings (tray -> person) ---------------------------
 
@@ -934,19 +1012,105 @@ sealed class GrampsViewModel : GrampsObservable
 
     static void UpdateFindingCard(SourceCardVM card, SavedEntry entry)
     {
-        var info = entry.Info;
-        card.Title = info.Pfarrei is { Length: > 0 } parish
-            ? parish : info.CitationTitle;
-        card.Subtitle = info.BookLabel;
-        card.Page = info.Page
-            ?? (info.Scan > 0 ? "Scan " + info.Scan : info.ScanLabel);
+        card.Title = entry.CardTitle;
+        card.Subtitle = entry.CardSubtitle;
+        card.Page = entry.CardPage;
         card.ToolTipText = string.Join("\n", new[]
         {
-            entry.Name,
-            info.CitationTitle,
-            info.PageDescription,
+            entry.Info.CitationTitle,
+            entry.Info.PageDescription,
             entry.Comment,
         }.Where(line => line.Length > 0));
+    }
+
+    public ICommand EditCitationCommand { get; }
+    public ICommand UnadoptCommand { get; }
+
+    /// <summary>Edits the citation-level fields of a FINDING card: Seite
+    /// (a page field the scrape cannot deliver) and Kommentar (becomes
+    /// the citation note in Gramps). The whole flow (dialog + library
+    /// commit) runs in MainViewModel - it is the same edit the tray
+    /// offers. A COPY made from here is adopted to the centered person
+    /// right away: that person's different note is what the copy was
+    /// made for. Book/source fields stay scrape-derived by design, and
+    /// existing Gramps citation cards are read-only (no update API).</summary>
+    void EditFindingCitation(SourceCardVM card)
+    {
+        if (card.FindingId is not { } findingId
+            || FindLibraryEntry(findingId) is not { } entry)
+        {
+            return;
+        }
+        var result = _editCitation(entry);
+        if (result is not null && !ReferenceEquals(result, entry)
+            && _centerNode is { } center
+            && !center.AdoptedFindings.Contains(result.Finding.Id))
+        {
+            center.AdoptedFindings.Add(result.Finding.Id);
+            RefreshLinkView();
+        }
+    }
+
+    /// <summary>Removes a finding card from the centered person's working
+    /// set - pure staging, the find stays in the tray (unlike the tray's
+    /// ✕, which deletes it). Staged assignments of this citation to the
+    /// person's events would keep uploading invisibly once the card is
+    /// gone, so they go with it, behind a confirmation. Citation
+    /// references on pending events (CreateEvent.FindingId) stay - those
+    /// events were deliberately created WITH this citation.</summary>
+    void UnadoptFinding(SourceCardVM card)
+    {
+        if (_centerNode is not { } center || card.FindingId is not { } findingId)
+        {
+            return;
+        }
+        var factIds = Facts.Select(f => f.Id).ToHashSet();
+        var staged = Changes.Where(c =>
+            c.Kind == GrampsChangeKind.AttachCitation
+            && c.FindingId == findingId
+            && c.TargetHandle is { } target && factIds.Contains(target)).ToList();
+        if (staged.Count > 0)
+        {
+            var answer = System.Windows.MessageBox.Show(
+                $"Entfernt auch {staged.Count} vorgemerkte Zuordnung(en) dieses Zitats. Fortfahren?",
+                "Fund aus Ansicht entfernen", System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question);
+            if (answer != System.Windows.MessageBoxResult.Yes)
+            {
+                return;
+            }
+            foreach (var entry in staged)
+            {
+                Changes.Remove(entry);
+            }
+        }
+        center.AdoptedFindings.Remove(findingId);
+        if (staged.Count > 0)
+        {
+            AfterChangesMutation("Fund aus der Ansicht entfernt");
+        }
+        else
+        {
+            RefreshLinkView();
+            Status("Fund aus der Ansicht entfernt – bleibt in der Ablage.");
+        }
+    }
+
+    /// <summary>Called by MainViewModel after a citation edit (from the
+    /// tray or a source card): re-derives the display labels that
+    /// snapshot the page (the UPLOAD payload always resolves fresh from
+    /// the library) and refreshes the views rendering the finding.</summary>
+    public void OnFindingCitationChanged(Guid findingId)
+    {
+        if (FindLibraryEntry(findingId) is { } entry)
+        {
+            foreach (var carrier in Changes.Where(c => c.FindingId == findingId))
+            {
+                carrier.FindLabel = entry.CardPage;
+            }
+        }
+        RebuildChangeTree();
+        RefreshLinkView();
     }
 
     static void UpdateCitationCard(SourceCardVM card, CitationRef reference)
@@ -1160,6 +1324,83 @@ sealed class GrampsViewModel : GrampsObservable
         AfterChangesMutation($"Neues Ereignis {eventType.Label} vorgemerkt");
     }
 
+    public ICommand EditEventCommand { get; }
+    public ICommand RemoveEventCommand { get; }
+
+    /// <summary>Edits a pending "(neu)" event via the EventTypeDialog in
+    /// edit mode. The type list is FILTERED to the entry's scope: a
+    /// person event turning into a family event (or back) would change
+    /// its owner, which assignments and the change tree hang off - such
+    /// a change is delete + re-create, not an edit.</summary>
+    void EditPendingEvent(FactRowVM fact)
+    {
+        if (Changes.FirstOrDefault(c =>
+                c.Id == fact.Id && c.Kind == GrampsChangeKind.CreateEvent)
+            is not { } entry)
+        {
+            return;
+        }
+        bool isFamily = entry.OwnerKind is "family" or "pending-family";
+        var choices = EventTypeChoices
+            .Where(c => c.IsFamily == isFamily).ToList();
+        if (choices.Count == 0)
+        {
+            return;
+        }
+        var (dateType, dateText) =
+            EventTypeDialog.SplitDateDisplay(entry.EventDateText ?? "");
+        var dialog = new EventTypeDialog(choices,
+                                         choices.FirstOrDefault(
+                                             c => c.Xml == entry.EventType),
+                                         dateText,
+                                         entry.EventDescription ?? "",
+                                         dateType, edit: true)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        if (dialog.ShowDialog() != true || dialog.SelectedType is not { } choice)
+        {
+            return;
+        }
+        var date = ParseDate(dialog.DateText);
+        if (date is not null)
+        {
+            date.Type = dialog.DateType;
+        }
+        entry.EventType = choice.Xml;
+        entry.EventTypeLabel = choice.Label;
+        entry.EventDate = date;
+        entry.EventDateText = dialog.DateDisplay;
+        entry.EventDescription = NullIfEmpty(dialog.Description);
+        RefreshPendingTargetLabels(entry);
+        AfterChangesMutation($"Ereignis {choice.Label} geändert");
+    }
+
+    /// <summary>Attach entries snapshot their target's label at creation;
+    /// re-derive it after an event edit so the change list stays true.</summary>
+    void RefreshPendingTargetLabels(GrampsChangeEntry eventEntry)
+    {
+        var row = new FactRowVM(eventEntry.Id);
+        row.UpdateFromPending(eventEntry);
+        foreach (var attach in Changes.Where(c =>
+                     c.TargetKind == "pending-event"
+                     && c.TargetHandle == eventEntry.Id))
+        {
+            attach.TargetLabel = row.Label;
+        }
+    }
+
+    /// <summary>Row-side twin of the change list's delete.</summary>
+    void RemovePendingEvent(FactRowVM fact)
+    {
+        if (Changes.FirstOrDefault(c =>
+                c.Id == fact.Id && c.Kind == GrampsChangeKind.CreateEvent)
+            is { } entry)
+        {
+            DeleteEntry(entry);
+        }
+    }
+
     (string Key, string Label) FactEntity(FactRowVM fact)
     {
         if (fact.IsPendingNew
@@ -1282,7 +1523,6 @@ sealed class GrampsViewModel : GrampsObservable
         RebuildFamilyCombo();
         RebuildRows();
         SyncFacts();
-        RecomputeBadges();
         RebuildChangeTree();
         RefreshLinkView();
         Status($"{status} – {Changes.Count} Änderung(en) offen");
@@ -1313,28 +1553,6 @@ sealed class GrampsViewModel : GrampsObservable
                 }
             }
             ChangeTree.Add(group);
-        }
-    }
-
-    void RecomputeBadges()
-    {
-        foreach (var fact in Facts)
-        {
-            fact.PendingCount = Changes.Count(c =>
-                c.Kind is GrampsChangeKind.AttachCitation
-                    or GrampsChangeKind.AttachExisting
-                && c.TargetHandle == fact.Id);
-        }
-        foreach (var box in AllBoxes())
-        {
-            box.PendingCount = box.IsVirtual
-                ? Changes.Count(c =>
-                    c.Kind == GrampsChangeKind.CreateEvent
-                    && c.OwnerKind == "pending-person"
-                    && "new:" + c.OwnerHandle == box.Id)
-                : Changes.Count(c =>
-                    c.Kind == GrampsChangeKind.CreateEvent
-                    && c.OwnerKind == "person" && c.OwnerHandle == box.Id);
         }
     }
 

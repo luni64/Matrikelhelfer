@@ -7,14 +7,20 @@ namespace Matrikelhelfer.Views;
 /// Name/gender entry for a virtual person created from a "Neu" tree
 /// slot. Gender and surname arrive prefilled from the slot (a father
 /// slot is male and usually carries the child's surname); everything
-/// stays editable. Anlegen needs at least one name part.
+/// stays editable. Anlegen needs at least one name part. The same
+/// dialog edits a not-yet-uploaded virtual person (edit: true).
 /// </summary>
 partial class NewPersonDialog : MetroWindow
 {
     public NewPersonDialog(string context, string given, string surname,
-                           string gender)
+                           string gender, bool edit = false)
     {
         InitializeComponent();
+        if (edit)
+        {
+            Title = "Person bearbeiten";
+            SaveButton.Content = "Übernehmen";
+        }
         ContextLine.Text = context;
         GivenBox.Text = given;
         SurnameBox.Text = surname;

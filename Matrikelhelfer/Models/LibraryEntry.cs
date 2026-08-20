@@ -10,7 +10,6 @@ namespace Matrikelhelfer.Models;
 record LibraryEntry(Finding Finding, StoredPage Page)
 {
     public MatriculaInfo Info => Page.Info;
-    public string Name => Finding.Name;
     public string Comment => Finding.Comment;
     public DateTime SavedAt => Finding.SavedAt;
 }

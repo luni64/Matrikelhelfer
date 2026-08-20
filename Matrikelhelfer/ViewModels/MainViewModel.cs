@@ -107,16 +107,9 @@ class MainViewModel : INotifyPropertyChanged
 
     // User-entered notes for the entry about to be saved: whose record was
     // found on this page and why it is interesting. Cleared on every read.
-    // Name is the find's identity WITHIN its page: changing it means
-    // "probably a different person", so Speichern asks; changing the comment
-    // never does.
-    string _nameText = "";
-    public string NameText
-    {
-        get => _nameText;
-        set => SetField(ref _nameText, value);
-    }
-
+    // Since the Name field was removed (2026-08) the comment is the find's
+    // whole annotation - it is what distinguishes finds on one page, and it
+    // reaches Gramps as the citation note.
     string _commentText = "";
     public string CommentText
     {
@@ -280,7 +273,6 @@ class MainViewModel : INotifyPropertyChanged
                 _currentInfo = value.Info;
                 _boundEntry = value;
                 DisplayInfo(value.Info);
-                NameText = value.Name;
                 CommentText = value.Comment;
             }
             CommandManager.InvalidateRequerySuggested();
@@ -418,6 +410,7 @@ class MainViewModel : INotifyPropertyChanged
     public ICommand HelpCommand { get; }
     public ICommand ToggleEntriesPanelCommand { get; }
     public ICommand DeleteEntryCommand { get; }
+    public ICommand EditCitationCommand { get; }
     public ICommand NavigateToEntryCommand { get; }
     public ICommand AdoptIntoGrampsCommand { get; }
     public ICommand ExportEntriesCommand { get; }
@@ -480,10 +473,16 @@ class MainViewModel : INotifyPropertyChanged
         DeleteEntryCommand = new RelayCommand<SavedEntry>(
             entry => DeleteEntry(entry ?? SelectedSavedEntry),
             entry => (entry ?? SelectedSavedEntry) != null);
+        // Like DeleteEntryCommand: the per-card button passes its own card,
+        // the context menu passes none and acts on the selection.
+        EditCitationCommand = new RelayCommand<SavedEntry>(
+            entry => EditCitation(entry ?? SelectedSavedEntry),
+            entry => (entry ?? SelectedSavedEntry) != null);
         NavigateToEntryCommand = new RelayCommand(NavigateToSelectedEntry, () => SelectedSavedEntry != null);
         AdoptIntoGrampsCommand = new RelayCommand(AdoptSelectedIntoGramps,
             () => SelectedSavedEntry != null);
-        Gramps = new GrampsViewModel(_gramps, SavedEntries, s => StatusText = s);
+        Gramps = new GrampsViewModel(_gramps, SavedEntries, s => StatusText = s,
+                                     EditCitation);
         ExportEntriesCommand = new RelayCommand(ExportEntries, () => SavedEntries.Count > 0);
         ExportBibTexCommand = new RelayCommand(ExportBibTex, () => SavedEntries.Count > 0);
         ClearAllEntriesCommand = new RelayCommand(ClearAllEntries, () => SavedEntries.Count > 0);
@@ -499,20 +498,20 @@ class MainViewModel : INotifyPropertyChanged
     // wrong. Cheap enough (no collection scan) to run in CanExecute.
     bool IsDirty()
     {
-        var (name, comment, seite) = CommittedState();
-        return NameText.Trim() != name || CommentText.Trim() != comment || PageText.Trim() != seite;
+        var (comment, seite) = CommittedState();
+        return CommentText.Trim() != comment || PageText.Trim() != seite;
     }
 
-    (string Name, string Comment, string Seite) CommittedState()
+    (string Comment, string Seite) CommittedState()
     {
         if (_boundEntry is not null)
         {
-            return (_boundEntry.Name, _boundEntry.Comment, _boundEntry.Page.Seite ?? "");
+            return (_boundEntry.Comment, _boundEntry.Page.Seite ?? "");
         }
         // Unbound: no notes are committed, but a page already stored for this
         // identity contributes its Seite - a read that prefills the number
         // from storage must not immediately look dirty.
-        return ("", "", FindPage(_currentInfo)?.Seite ?? "");
+        return ("", FindPage(_currentInfo)?.Seite ?? "");
     }
 
     // The stored page matching what is on display, or null when none exists
@@ -551,7 +550,7 @@ class MainViewModel : INotifyPropertyChanged
         {
             _boundEntry = null;
             // Drop the selection AND wipe the fields: otherwise the deleted
-            // entry's notes stay in Name/Kommentar/Seite with no matching
+            // entry's notes stay in Kommentar/Seite with no matching
             // saved entry, so the next list selection would pop the
             // discard-unsaved warning. Deleting a DIFFERENT row (via its
             // trash button) leaves the selection and display untouched.
@@ -649,7 +648,7 @@ class MainViewModel : INotifyPropertyChanged
     }
 
     // A new read wipes the display and the annotation fields - if the user
-    // typed something (Name/Kommentar/Seite) that is not saved as an entry
+    // typed something (Kommentar/Seite) that is not saved as an entry
     // yet, ask before discarding it.
     bool ConfirmDiscardUnsaved()
     {
@@ -658,7 +657,7 @@ class MainViewModel : INotifyPropertyChanged
             return true;
         }
         return MessageBox.Show(
-            "Die Eingaben (Name/Kommentar/Seite) wurden nicht gespeichert und gehen verloren. Fortfahren?",
+            "Die Eingaben (Kommentar/Seite) wurden nicht gespeichert und gehen verloren. Fortfahren?",
             "Ungespeicherte Eingaben",
             MessageBoxButton.OKCancel, MessageBoxImage.Warning) == MessageBoxResult.OK;
     }
@@ -685,7 +684,6 @@ class MainViewModel : INotifyPropertyChanged
             ImageUrlText = "";
             SourceText = "";
             PageCitationText = "";
-            NameText = "";
             CommentText = "";
         }
         finally
@@ -769,8 +767,16 @@ class MainViewModel : INotifyPropertyChanged
         CommandManager.InvalidateRequerySuggested();
     }
 
-    // The save flow. Both prompts fire HERE, on Speichern - never on
-    // keystroke or focus-loss, which would be unbearable while typing.
+    // The save flow - PROMPTLESS since the Name field was removed (2026-08;
+    // it never reached Gramps and its prompt system keyed on it):
+    //   bound   -> update in place.
+    //   unbound -> a finding with the SAME comment already on this page just
+    //              binds ("already saved"); otherwise a new finding is made.
+    // Same page + same comment would be indistinguishable data and would
+    // produce identical Gramps citations, so deduplicating on exactly that
+    // pair is correct, not lossy - and unlike the pre-2.0 value-equality
+    // check it compares nothing volatile. Distinct records on one page =
+    // distinct comments (or a copy via the citation dialog).
     void SaveCurrentEntry()
     {
         if (_currentInfo == null || _storageUnreadable)
@@ -778,88 +784,19 @@ class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        string name = NameText.Trim();
         string comment = CommentText.Trim();
-        string seite = PageText.Trim();
+        var page = CommitPage(_currentInfo, PageText.Trim());
 
-        // Step 1 - a changed name usually means a different person, but it is
-        // also how a typo gets corrected, so ask instead of guessing. (Naming
-        // a still-unnamed finding is NOT a change: no prompt.)
-        if (_boundEntry is not null && _boundEntry.Name.Length > 0 &&
-            !string.Equals(_boundEntry.Name, name, StringComparison.Ordinal))
+        if (_boundEntry is null && FindingWithComment(page, comment) is { } twin)
         {
-            var answer = ChoiceWindow.Ask(
-                "Name geändert",
-                $"Der Name wurde von „{_boundEntry.Name}“ zu „{name}“ geändert.\n\n" +
-                "Soll der vorhandene Eintrag überschrieben werden (Korrektur), oder ist es " +
-                "ein weiterer Fund auf derselben Seite?",
-                "Überschreiben", "Neuer Eintrag");
-            if (answer == ChoiceResult.Cancel)
-            {
-                return;
-            }
-            if (answer == ChoiceResult.Secondary)
-            {
-                _boundEntry = null;
-            }
+            _boundEntry = twin;
+            StatusText = "Bereits gespeichert – vorhandener Eintrag übernommen.";
         }
-
-        // Step 2 - does the RESULTING name collide with a different finding on
-        // this page? Deliberately checked for renames too, not just for new
-        // finds: renaming an entry back onto a name that already exists is
-        // exactly how two identical rows used to appear.
-        SavedEntry? absorbed = null;
-        var twin = FindingWithName(_boundEntry?.Page ?? FindPage(_currentInfo), name, _boundEntry);
-        if (twin is not null && _boundEntry is null)
-        {
-            // Re-reading a page and re-entering someone recorded earlier. Ask
-            // rather than auto-bind: there COULD be two Johann Meiers on one
-            // page (father and son), and this prompt is their only escape hatch.
-            var answer = ChoiceWindow.Ask(
-                "Fund bereits vorhanden",
-                $"Auf dieser Seite ist bereits ein Fund „{name}“ gespeichert.\n\n" +
-                "Soll dieser Eintrag aktualisiert werden, oder ist es eine zweite Person " +
-                "gleichen Namens auf derselben Seite?",
-                "Bestehenden aktualisieren", "Neuer Eintrag");
-            if (answer == ChoiceResult.Cancel)
-            {
-                return;
-            }
-            if (answer == ChoiceResult.Primary)
-            {
-                _boundEntry = twin;
-            }
-        }
-        else if (twin is not null)
-        {
-            // A rename walked onto an existing name - typically undoing an
-            // accidental split ("Johann Maier 2" corrected back). Merging
-            // writes the current input onto the survivor and drops the entry
-            // being edited, so no duplicate is left behind.
-            var answer = ChoiceWindow.Ask(
-                "Gleicher Name bereits vorhanden",
-                $"Auf dieser Seite gibt es bereits einen weiteren Fund „{name}“.\n\n" +
-                "„Zusammenführen“ übernimmt die Eingaben in den vorhandenen Eintrag und " +
-                "entfernt den gerade bearbeiteten. „Beide behalten“ legt zwei gleichnamige " +
-                "Funde auf derselben Seite an (z. B. Vater und Sohn).",
-                "Zusammenführen", "Beide behalten");
-            if (answer == ChoiceResult.Cancel)
-            {
-                return;
-            }
-            if (answer == ChoiceResult.Primary)
-            {
-                absorbed = _boundEntry;
-                _boundEntry = twin;
-            }
-        }
-
-        var page = CommitPage(_currentInfo, seite);
 
         if (_boundEntry is null)
         {
             var entry = new SavedEntry(
-                new Finding(Guid.NewGuid(), page.Id, DateTime.Now, name, comment), page);
+                new Finding(Guid.NewGuid(), page.Id, DateTime.Now, comment), page);
             SavedEntries.Add(entry);
             _boundEntry = entry;
         }
@@ -869,31 +806,21 @@ class MainViewModel : INotifyPropertyChanged
             // the find was made, so fixing a typo must not reshuffle a
             // date-sorted list.
             _boundEntry.Update(
-                _boundEntry.Finding with { PageId = page.Id, Name = name, Comment = comment },
+                _boundEntry.Finding with { PageId = page.Id, Comment = comment },
                 page);
         }
 
-        // The absorbed entry disappears only AFTER its data has been written
-        // onto the survivor.
-        if (absorbed is not null && !ReferenceEquals(absorbed, _boundEntry))
-        {
-            SavedEntries.Remove(absorbed);
-        }
-
-        // Keep the grid selection on what the display is bound to.
+        // Keep the list selection on what the display is bound to.
         SetField(ref _selectedSavedEntry, _boundEntry, nameof(SelectedSavedEntry));
         PersistEntries();
         CommandManager.InvalidateRequerySuggested();
     }
 
-    // A finding on `page` carrying `name`, ignoring `except` (the entry being
-    // edited - it can't collide with itself).
-    SavedEntry? FindingWithName(StoredPage? page, string name, SavedEntry? except) =>
-        page is null
-            ? null
-            : SavedEntries.FirstOrDefault(e => e.Page.Id == page.Id &&
-                  !ReferenceEquals(e, except) &&
-                  string.Equals(e.Name, name, StringComparison.CurrentCultureIgnoreCase));
+    // The finding on `page` with exactly this (trimmed) comment, if any -
+    // the value identity a find has left now that Name is gone.
+    SavedEntry? FindingWithComment(StoredPage page, string comment) =>
+        SavedEntries.FirstOrDefault(e => e.Page.Id == page.Id &&
+            string.Equals(e.Comment, comment, StringComparison.Ordinal));
 
     // Writes the page the display sits on: refreshes the scraped fields (a
     // re-read may genuinely improve them - the /de/ fix did) and stores the
@@ -913,6 +840,104 @@ class MainViewModel : INotifyPropertyChanged
         // physical page - merge rather than keep two.
         string? identity = target.Identity;
         if (identity is not null)
+        {
+            var rival = _pages.FirstOrDefault(p => p.Id != target.Id && p.Identity == identity);
+            if (rival is not null)
+            {
+                target = MergePages(target, rival);
+            }
+        }
+        return target;
+    }
+
+    // ONE citation-edit flow for both card lists (the tray and the Gramps
+    // tab's source cards - the latter routes here via the delegate handed to
+    // GrampsViewModel): dialog, library commit, then the Gramps-side
+    // refresh. Returns the entry now carrying the dialog's values - the
+    // edited original, or the new find made by "Als Kopie speichern" (a
+    // second citation of the same page with its own comment) - so the Gramps
+    // tab can adopt a copy to the centered person. Null when nothing was
+    // saved.
+    SavedEntry? EditCitation(SavedEntry? entry)
+    {
+        if (entry is null)
+        {
+            return null;
+        }
+        var dialog = new CitationEditDialog(entry.Info.CitationTitle,
+                                            entry.Page.Seite ?? "",
+                                            entry.Comment)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return null;
+        }
+        if (_storageUnreadable)
+        {
+            StatusText = "Zitat nicht gespeichert – Bibliothek ist nicht schreibbar.";
+            return null;
+        }
+
+        // Seite is a PAGE fact: it commits to the shared page either way,
+        // identity merge included (on ARCHION a corrected number can collide
+        // with an existing page). Only the comment's fate differs between
+        // overwrite and copy.
+        var page = CommitCitationPage(entry, dialog.Seite);
+        string comment = dialog.Comment.Trim();
+
+        SavedEntry result;
+        if (dialog.SaveAsCopy)
+        {
+            // the original keeps its own comment; Speichern's same-comment
+            // dedupe rule applies to the copy too
+            if (FindingWithComment(page, comment) is { } twin)
+            {
+                result = twin;
+                StatusText = "Fund mit diesem Kommentar existiert bereits.";
+            }
+            else
+            {
+                result = new SavedEntry(
+                    new Finding(Guid.NewGuid(), page.Id, DateTime.Now, comment), page);
+                SavedEntries.Add(result);
+                StatusText = "Kopie mit eigenem Kommentar angelegt.";
+            }
+        }
+        else
+        {
+            entry.Update(
+                entry.Finding with { PageId = page.Id, Comment = comment }, page);
+            result = entry;
+            StatusText = "Zitat aktualisiert.";
+        }
+
+        // If the edited entry is what the Zitate tab currently displays, its
+        // committed state just changed underneath the fields - resync them so
+        // the dirty check doesn't report phantom edits.
+        if (ReferenceEquals(_boundEntry, entry))
+        {
+            _currentInfo = page.Info;
+            DisplayInfo(page.Info);
+            CommentText = entry.Comment;
+        }
+        PersistEntries();
+        Gramps.OnFindingCitationChanged(entry.Finding.Id);
+        return result;
+    }
+
+    // The page half of a citation edit: writes the (possibly corrected)
+    // Seite to the entry's page and handles the identity collision.
+    StoredPage CommitCitationPage(SavedEntry entry, string seite)
+    {
+        string page = seite.Trim();
+        var target = entry.Page with
+        {
+            Info = entry.Page.Info with { Page = page.Length == 0 ? null : page },
+        };
+        UpsertPage(target);
+        if (target.Identity is { } identity)
         {
             var rival = _pages.FirstOrDefault(p => p.Id != target.Id && p.Identity == identity);
             if (rival is not null)

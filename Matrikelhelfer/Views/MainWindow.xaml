@@ -272,6 +272,7 @@
                 <ListBox.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="Im Browser öffnen" Command="{Binding NavigateToEntryCommand}" />
+                        <MenuItem Header="Zitat bearbeiten…" Command="{Binding EditCitationCommand}" />
                         <MenuItem Header="In Gramps-Ansicht übernehmen" Command="{Binding AdoptIntoGrampsCommand}" />
                         <MenuItem Header="Eintrag löschen" Command="{Binding DeleteEntryCommand}" />
                     </ContextMenu>
@@ -279,9 +280,12 @@
                 <ListBox.ItemContainerStyle>
                     <!-- Card chrome lives on the CONTAINER so selection can
                          restyle the border; the comment stays a tooltip (too
-                         long for the card). -->
+                         long for the card). Chrome matches the Gramps tab's
+                         source cards (Gray6/1.3, radius 6, padding 8,5;
+                         selection = accent border 2.2) so a find looks the
+                         same in both lists. -->
                     <Style TargetType="ListBoxItem">
-                        <Setter Property="Margin" Value="0,0,0,6" />
+                        <Setter Property="Margin" Value="0,3" />
                         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                         <Setter Property="ToolTip" Value="{Binding Comment}" />
                         <Setter Property="Template">
@@ -289,9 +293,9 @@
                                 <ControlTemplate TargetType="ListBoxItem">
                                     <Border x:Name="Card"
                                             Background="{DynamicResource MahApps.Brushes.ThemeBackground}"
-                                            BorderBrush="{DynamicResource MahApps.Brushes.Gray7}"
-                                            BorderThickness="1.5" CornerRadius="6"
-                                            Padding="10,7">
+                                            BorderBrush="{DynamicResource MahApps.Brushes.Gray6}"
+                                            BorderThickness="1.3" CornerRadius="6"
+                                            Padding="8,5">
                                         <ContentPresenter />
                                     </Border>
                                     <ControlTemplate.Triggers>
@@ -302,6 +306,8 @@
                                         <Trigger Property="IsSelected" Value="True">
                                             <Setter TargetName="Card" Property="BorderBrush"
                                                     Value="{DynamicResource MahApps.Brushes.Accent}" />
+                                            <Setter TargetName="Card" Property="BorderThickness"
+                                                    Value="2.2" />
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -315,6 +321,12 @@
                     </Style>
                 </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
+                    <!-- Content = the SHARED card face (SavedEntry.Card*):
+                         the same three lines the Gramps tab's finding cards
+                         show, plus the comment's first line on top (two
+                         finds on one page differ only by their comments).
+                         The saved date moved out of the card with the
+                         redesign (the list is date-sorted anyway). -->
                     <DataTemplate>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -322,56 +334,79 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0">
-                                <!-- Name is the find's identity - collapsed
-                                     when (yet) empty rather than showing a
-                                     blank bold line. -->
-                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                           TextTrimming="CharacterEllipsis">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
+                                <!-- lead line = first line of the comment:
+                                     with Name gone it is what tells two
+                                     finds on one page apart -->
+                                <TextBlock x:Name="NoteLine" Text="{Binding CardNote}"
+                                           FontWeight="SemiBold" FontSize="12"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding CardTitle}" FontSize="12"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="SubtitleLine" Text="{Binding CardSubtitle}"
+                                           FontSize="11"
+                                           Foreground="{DynamicResource MahApps.Brushes.Gray3}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="PageLine" Text="{Binding CardPage}"
+                                           FontSize="11"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <!-- both buttons appear only while their card is
+                                 hovered (Hidden keeps the layout stable) and
+                                 act on THIS card via CommandParameter, no
+                                 selection needed. -->
+                            <StackPanel Grid.Column="1" Orientation="Vertical"
+                                        VerticalAlignment="Top" Margin="6,0,0,0">
+                                <Button CommandParameter="{Binding}"
+                                        Command="{Binding DataContext.EditCitationCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                        Width="20" Height="20" Padding="0"
+                                        ToolTip="Zitat bearbeiten (Seite und Kommentar)">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource MahApps.Styles.Button.Chromeless}">
+                                            <Setter Property="Visibility" Value="Hidden" />
                                             <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Name}" Value="">
-                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                <DataTrigger Value="True"
+                                                             Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
+                                                    <Setter Property="Visibility" Value="Visible" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                                <TextBlock Text="{Binding Info.CitationTitle}"
-                                           FontSize="11.5" TextTrimming="CharacterEllipsis"
-                                           Foreground="{DynamicResource MahApps.Brushes.Gray3}" />
-                                <DockPanel>
-                                    <TextBlock DockPanel.Dock="Right" FontSize="11"
-                                               Foreground="{DynamicResource MahApps.Brushes.Gray5}"
-                                               VerticalAlignment="Bottom" Margin="6,0,0,0"
-                                               Text="{Binding SavedAt, StringFormat='{}{0:dd.MM.yy}'}" />
-                                    <TextBlock Text="{Binding Info.PageDescription}"
-                                               FontSize="11.5" TextTrimming="CharacterEllipsis" />
-                                </DockPanel>
+                                    </Button.Style>
+                                    <iconPacks:PackIconFontAwesome6 Kind="PencilSolid" Width="10" Height="10"
+                                                                    Foreground="{DynamicResource MahApps.Brushes.Gray2}" />
+                                </Button>
+                                <Button CommandParameter="{Binding}"
+                                        Command="{Binding DataContext.DeleteEntryCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                        Width="20" Height="20" Padding="0"
+                                        ToolTip="Eintrag löschen">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource MahApps.Styles.Button.Chromeless}">
+                                            <Setter Property="Visibility" Value="Hidden" />
+                                            <Style.Triggers>
+                                                <DataTrigger Value="True"
+                                                             Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                    <iconPacks:PackIconFontAwesome6 Kind="XmarkSolid" Width="12" Height="12"
+                                                                    Foreground="Firebrick" />
+                                </Button>
                             </StackPanel>
-                            <!-- x appears only while its card is hovered
-                                 (Hidden keeps the layout stable); deletes THIS
-                                 card via CommandParameter, no selection needed. -->
-                            <Button Grid.Column="1" VerticalAlignment="Top" Margin="6,0,0,0"
-                                    CommandParameter="{Binding}"
-                                    Command="{Binding DataContext.DeleteEntryCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                    Width="20" Height="20" Padding="0"
-                                    ToolTip="Eintrag löschen">
-                                <Button.Style>
-                                    <Style TargetType="Button" BasedOn="{StaticResource MahApps.Styles.Button.Chromeless}">
-                                        <Setter Property="Visibility" Value="Hidden" />
-                                        <Style.Triggers>
-                                            <DataTrigger Value="True"
-                                                         Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Button.Style>
-                                <iconPacks:PackIconFontAwesome6 Kind="XmarkSolid" Width="12" Height="12"
-                                                                Foreground="Firebrick" />
-                            </Button>
                         </Grid>
+                        <DataTemplate.Triggers>
+                            <!-- empty lines collapse, exactly like on the
+                                 Gramps tab's source cards -->
+                            <DataTrigger Binding="{Binding CardNote}" Value="">
+                                <Setter TargetName="NoteLine" Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding CardSubtitle}" Value="">
+                                <Setter TargetName="SubtitleLine" Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding CardPage}" Value="">
+                                <Setter TargetName="PageLine" Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
@@ -469,25 +504,14 @@
             </ScrollViewer.Style>
         <StackPanel>
             <!-- The find's annotation, saved together with the entry so
-                 interesting finds can be revisited later: the person found
-                 on this page (Name) plus free-text notes (Kommentar). Both
-                 cleared on every read. -->
+                 interesting finds can be revisited later: free-text notes
+                 (Kommentar), cleared on every read. The former Name field
+                 was removed (2026-08) - it never reached Gramps; whose
+                 record it is belongs in the comment, which becomes the
+                 citation note. -->
             <Border Style="{StaticResource SectionCardStyle}">
                 <StackPanel>
                     <TextBlock Text="Notizen" Style="{StaticResource SectionHeadingStyle}" />
-                    <Grid Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <iconPacks:PackIconFontAwesome6 Grid.Column="0" Kind="UserSolid"
-                                Width="15" Height="15" VerticalAlignment="Center" Margin="2,0,8,0"
-                                Foreground="{DynamicResource MahApps.Brushes.Gray3}" />
-                        <TextBox Grid.Column="1" Padding="6,5"
-                                 mah:TextBoxHelper.Watermark="Name"
-                                 mah:TextBoxHelper.UseFloatingWatermark="True"
-                                 Text="{Binding NameText, UpdateSourceTrigger=PropertyChanged}" />
-                    </Grid>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />

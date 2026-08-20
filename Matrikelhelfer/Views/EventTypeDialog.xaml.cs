@@ -15,6 +15,9 @@ namespace Matrikelhelfer.Views;
 /// incl. Gramps qualifiers — a marriage entry's "Mutter bereits
 /// verstorben" becomes a death "vor 1757", not a death on the wedding
 /// day) and the optional description. Double-click on a type saves.
+/// The same dialog edits a pending "(neu)" event (edit: true); the
+/// CALLER filters the choices to the entry's scope then, so a person
+/// event cannot silently turn into a family event.
 /// </summary>
 partial class EventTypeDialog : MetroWindow
 {
@@ -26,10 +29,31 @@ partial class EventTypeDialog : MetroWindow
         ("nach", "after"),
     ];
 
+    /// <summary>Splits a stored display date ("vor 1757") back into the
+    /// DateSpec type and the raw date text the dialog's boxes take.</summary>
+    public static (string DateType, string DateText) SplitDateDisplay(string display)
+    {
+        foreach (var (label, type) in s_dateModifiers)
+        {
+            if (display.StartsWith(label + " ", StringComparison.Ordinal))
+            {
+                return (type, display[(label.Length + 1)..]);
+            }
+        }
+        return ("regular", display);
+    }
+
     public EventTypeDialog(IEnumerable<EventTypeChoice> choices,
-                           EventTypeChoice? preselect, string dateText)
+                           EventTypeChoice? preselect, string dateText,
+                           string description = "",
+                           string dateType = "regular", bool edit = false)
     {
         InitializeComponent();
+        if (edit)
+        {
+            Title = "Ereignis bearbeiten";
+            SaveButton.Content = "Übernehmen";
+        }
         var view = new ListCollectionView(choices.ToList());
         view.GroupDescriptions!.Add(
             new PropertyGroupDescription(nameof(EventTypeChoice.Group)));
@@ -40,8 +64,11 @@ partial class EventTypeDialog : MetroWindow
             TypeList.ScrollIntoView(preselect);
         }
         DateModifierBox.ItemsSource = s_dateModifiers.Select(m => m.Label);
-        DateModifierBox.SelectedIndex = 0;
+        int modifierIndex = Array.FindIndex(s_dateModifiers,
+                                            m => m.Type == dateType);
+        DateModifierBox.SelectedIndex = Math.Max(0, modifierIndex);
         DateBox.Text = dateText;
+        DescriptionBox.Text = description;
     }
 
     public EventTypeChoice? SelectedType => TypeList.SelectedItem as EventTypeChoice;

@@ -73,17 +73,6 @@ sealed class PersonBoxVM(string id) : GrampsObservable
     bool _isCenter;
     public bool IsCenter { get => _isCenter; set => Set(ref _isCenter, value); }
 
-    int _pendingCount;
-    public int PendingCount
-    {
-        get => _pendingCount;
-        set { if (Set(ref _pendingCount, value)) OnChanged(nameof(Badges)); }
-    }
-
-    // Short corner badge ("○2"); the count's meaning is in the tooltip
-    // territory - the box is too small for prose now.
-    public string Badges => PendingCount > 0 ? $"○{PendingCount}" : "";
-
     string _toolTipText = "";
     public string ToolTipText { get => _toolTipText; set => Set(ref _toolTipText, value); }
 
@@ -291,15 +280,6 @@ sealed class FactRowVM(string id) : GrampsObservable
     bool _isCheckEnabled = true;
     public bool IsCheckEnabled { get => _isCheckEnabled; set => Set(ref _isCheckEnabled, value); }
 
-    int _pendingCount;
-    public int PendingCount
-    {
-        get => _pendingCount;
-        set { if (Set(ref _pendingCount, value)) OnChanged(nameof(Badges)); }
-    }
-
-    public string Badges => PendingCount > 0 ? $"○{PendingCount}" : "";
-
     public void UpdateFrom(PersonEvent evt)
     {
         string? shortPlace = evt.Place?.Split(',')[0].Trim();
@@ -397,25 +377,28 @@ enum GrampsChangeKind { AttachCitation, CreateEvent, AttachExisting, CreatePerso
 /// REFERENCE the saved Finding — the payload is resolved from the
 /// library at upload time, so a later Seite correction still reaches
 /// Gramps. DependsOnId links dependent entries (event on a new person)
-/// for the display tree and cascade deletion.</summary>
+/// for the display tree and cascade deletion. Pending entries are
+/// EDITABLE (virtual person / (neu) event), so the edited fields have
+/// plain setters; the views refresh via AfterChangesMutation, not INPC
+/// on the entry.</summary>
 sealed class GrampsChangeEntry : GrampsObservable
 {
     // settable so a CreatePerson entry can use its own id as EntityKey
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
     public required GrampsChangeKind Kind { get; init; }
     public required string EntityKey { get; init; }      // person/family id
-    public required string EntityLabel { get; init; }
+    public required string EntityLabel { get; set; }
     public string? DependsOnId { get; init; }
 
     // The saved find this entry cites (AttachCitation always; CreateEvent
     // when a finding card was active — else the event goes citation-less).
     public Guid? FindingId { get; init; }
-    public string? FindLabel { get; init; }              // display: page at creation time
+    public string? FindLabel { get; set; }               // display: refreshed on Seite edit
 
     // AttachCitation / AttachExisting
     public string? TargetKind { get; init; }             // event | pending-event
     public string? TargetHandle { get; init; }           // handle | change-entry id
-    public string? TargetLabel { get; init; }
+    public string? TargetLabel { get; set; }             // refreshed on event edit
 
     // AttachExisting: which existing Gramps citation to attach
     public string? CitationHandle { get; init; }
@@ -425,19 +408,19 @@ sealed class GrampsChangeEntry : GrampsObservable
     // EventTypeLabel the localized display text. EventDate is the
     // EVENT's own (possibly qualified) date, not the record's. Owner
     // "pending-person"/"pending-family" references a graph node.
-    public string? EventType { get; init; }
-    public string? EventTypeLabel { get; init; }
-    public DateSpec? EventDate { get; init; }
-    public string? EventDateText { get; init; }
+    public string? EventType { get; set; }
+    public string? EventTypeLabel { get; set; }
+    public DateSpec? EventDate { get; set; }
+    public string? EventDateText { get; set; }
     public string? OwnerKind { get; set; }
     public string? OwnerHandle { get; set; }
-    public string? EventDescription { get; init; }
+    public string? EventDescription { get; set; }
 
     // CreatePerson: display fields — the linkage lives in the graph,
     // keyed by this entry's id ("new:" + Id is the node id).
-    public string? NewGiven { get; init; }
-    public string? NewSurname { get; init; }
-    public string? NewGender { get; init; }
+    public string? NewGiven { get; set; }
+    public string? NewSurname { get; set; }
+    public string? NewGender { get; set; }
     public string? RoleLabel { get; init; }
 
     string? _error;

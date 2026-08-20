@@ -8,20 +8,60 @@
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
+        <!-- Pending items (virtual persons, "(neu)" events) are editable
+             until upload; real Gramps objects stay read-only here (the
+             bridge has no update API by design). The menus route their
+             commands through the placement target's Tag = the view model
+             (a ContextMenu popup is outside the visual tree, so the
+             usual AncestorType=UserControl binding cannot reach it). -->
+        <ContextMenu x:Key="VirtualPersonMenu">
+            <MenuItem Header="Bearbeiten…"
+                      Command="{Binding PlacementTarget.Tag.EditPersonCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+            <MenuItem Header="Entfernen"
+                      Command="{Binding PlacementTarget.Tag.RemovePersonCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+        </ContextMenu>
+        <ContextMenu x:Key="FindingCardMenu">
+            <MenuItem Header="Zitat bearbeiten…"
+                      Command="{Binding PlacementTarget.Tag.EditCitationCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+            <MenuItem Header="Aus Ansicht entfernen"
+                      Command="{Binding PlacementTarget.Tag.UnadoptCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+        </ContextMenu>
+        <ContextMenu x:Key="PendingEventMenu">
+            <MenuItem Header="Bearbeiten…"
+                      Command="{Binding PlacementTarget.Tag.EditEventCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+            <MenuItem Header="Entfernen"
+                      Command="{Binding PlacementTarget.Tag.RemoveEventCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+        </ContextMenu>
+
         <!-- One tree box; identity-stable, updated in place. Fixed widths
              (no content-driven sizing); the whole box clicks: real person
              navigates, "Neu" slot creates a virtual person. Small boxes
              (parents/children) are strict two-liners: name + life span
              ("*1800" / "+1880" / "1800–1880"); the couple boxes keep the
              two full life lines. Everything else lives in the tooltip;
-             the pending badge sits in the corner. -->
+             pending state shows only as the accent tint (details are in
+             the change list). -->
         <DataTemplate x:Key="PersonBox" DataType="{x:Type vm:PersonBoxVM}">
             <Border x:Name="Box" Margin="3,2" Padding="5,1" CornerRadius="8"
                     Background="{DynamicResource MahApps.Brushes.ThemeBackground}"
                     BorderBrush="{DynamicResource MahApps.Brushes.Gray5}"
                     BorderThickness="1.3"
                     Width="104" Height="40" Cursor="Hand"
-                    ToolTip="{Binding ToolTipText}">
+                    ToolTip="{Binding ToolTipText}"
+                    Tag="{Binding DataContext,
+                          RelativeSource={RelativeSource AncestorType=UserControl}}">
                 <Border.InputBindings>
                     <MouseBinding Gesture="LeftClick"
                                   Command="{Binding DataContext.NavigateCommand,
@@ -45,10 +85,34 @@
                                    TextTrimming="CharacterEllipsis" TextAlignment="Center"
                                    Visibility="Collapsed" />
                     </StackPanel>
-                    <TextBlock x:Name="BadgeLine" Text="{Binding Badges}"
-                               FontSize="9" Foreground="#B36B00"
-                               HorizontalAlignment="Right" VerticalAlignment="Top"
-                               Margin="0,0,2,0" />
+                    <!-- hover-only edit/remove for the CENTERED virtual
+                         person: editing works from the large box (small
+                         boxes have no room - center a person to edit it);
+                         the context menu covers every virtual box -->
+                    <StackPanel x:Name="EditButtons" Orientation="Vertical"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Visibility="Collapsed"
+                                Background="{DynamicResource MahApps.Brushes.Accent4}">
+                        <Button Width="16" Height="16" Padding="0"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                ToolTip="Person bearbeiten"
+                                Command="{Binding DataContext.EditPersonCommand,
+                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}">
+                            <iconPacks:PackIconFontAwesome6 Kind="PencilSolid"
+                                    Width="10" Height="10"
+                                    Foreground="{DynamicResource MahApps.Brushes.Gray2}" />
+                        </Button>
+                        <Button Width="16" Height="16" Padding="0"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                ToolTip="Neue Person entfernen (wie in der Änderungsliste; abhängige Änderungen werden mit entfernt)"
+                                Command="{Binding DataContext.RemovePersonCommand,
+                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}">
+                            <iconPacks:PackIconFontAwesome6 Kind="XmarkSolid"
+                                    Width="11" Height="11" Foreground="Firebrick" />
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </Border>
             <DataTemplate.Triggers>
@@ -72,7 +136,19 @@
                             Value="{DynamicResource MahApps.Brushes.Accent}" />
                     <Setter TargetName="Box" Property="Background"
                             Value="{DynamicResource MahApps.Brushes.Accent4}" />
+                    <Setter TargetName="Box" Property="ContextMenu"
+                            Value="{StaticResource VirtualPersonMenu}" />
                 </DataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsVirtual}" Value="True" />
+                        <Condition Binding="{Binding IsCenter}" Value="True" />
+                        <Condition Binding="{Binding IsMouseOver, ElementName=Box}"
+                                   Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter TargetName="EditButtons" Property="Visibility"
+                            Value="Visible" />
+                </MultiDataTrigger>
                 <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
                     <Setter TargetName="Box" Property="BorderBrush"
                             Value="{DynamicResource MahApps.Brushes.Gray7}" />
@@ -85,7 +161,6 @@
                     <Setter TargetName="SpanLine" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="BirthLine" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="DeathLine" Property="Visibility" Value="Collapsed" />
-                    <Setter TargetName="BadgeLine" Property="Visibility" Value="Collapsed" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -111,7 +186,9 @@
                     Background="{DynamicResource MahApps.Brushes.ThemeBackground}"
                     BorderBrush="{DynamicResource MahApps.Brushes.Gray6}"
                     BorderThickness="1.3" CornerRadius="6" Padding="8,5"
-                    Margin="0,3" Cursor="Hand">
+                    Margin="0,3" Cursor="Hand"
+                    Tag="{Binding DataContext,
+                          RelativeSource={RelativeSource AncestorType=UserControl}}">
                 <Border.InputBindings>
                     <MouseBinding Gesture="LeftClick"
                                   Command="{Binding DataContext.SelectFactCommand,
@@ -122,35 +199,57 @@
                                             RelativeSource={RelativeSource AncestorType=UserControl}}"
                                   CommandParameter="{Binding}" />
                 </Border.InputBindings>
-                <DockPanel>
-                    <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
-                              Margin="0,0,6,0" IsHitTestVisible="False"
-                              Focusable="False"
-                              Visibility="{Binding ShowCheckBox,
-                                           Converter={StaticResource BoolToVisibility}}"
-                              IsChecked="{Binding IsChecked, Mode=OneWay}"
-                              IsEnabled="{Binding IsCheckEnabled}" />
-                    <StackPanel>
-                        <DockPanel>
-                            <TextBlock DockPanel.Dock="Right"
-                                       Text="{Binding Badges}" Foreground="#B36B00"
-                                       FontSize="10" VerticalAlignment="Center"
-                                       Margin="4,0,0,0" />
+                <Grid>
+                    <DockPanel>
+                        <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
+                                  Margin="0,0,6,0" IsHitTestVisible="False"
+                                  Focusable="False"
+                                  Visibility="{Binding ShowCheckBox,
+                                               Converter={StaticResource BoolToVisibility}}"
+                                  IsChecked="{Binding IsChecked, Mode=OneWay}"
+                                  IsEnabled="{Binding IsCheckEnabled}" />
+                        <StackPanel>
                             <TextBlock x:Name="FactLabel" Text="{Binding EventName}"
                                        FontSize="12" TextTrimming="CharacterEllipsis" />
-                        </DockPanel>
-                        <DockPanel>
-                            <TextBlock DockPanel.Dock="Right" x:Name="ZitCount"
-                                       Foreground="{DynamicResource MahApps.Brushes.Gray4}"
-                                       FontSize="10.5" VerticalAlignment="Center"
-                                       Margin="4,0,0,0"
-                                       Text="{Binding CitationCount, StringFormat='Zit. {0}'}" />
-                            <TextBlock Text="{Binding DetailLine}" FontSize="11"
-                                       Foreground="{DynamicResource MahApps.Brushes.Gray3}"
-                                       TextTrimming="CharacterEllipsis" />
-                        </DockPanel>
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Right" x:Name="ZitCount"
+                                           Foreground="{DynamicResource MahApps.Brushes.Gray4}"
+                                           FontSize="10.5" VerticalAlignment="Center"
+                                           Margin="4,0,0,0"
+                                           Text="{Binding CitationCount, StringFormat='Zit. {0}'}" />
+                                <TextBlock Text="{Binding DetailLine}" FontSize="11"
+                                           Foreground="{DynamicResource MahApps.Brushes.Gray3}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
+                        </StackPanel>
+                    </DockPanel>
+                    <!-- hover-only edit/remove, pending "(neu)" events only
+                         (real Gramps events are edited in Gramps) -->
+                    <StackPanel x:Name="RowButtons" Orientation="Vertical"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Visibility="Collapsed"
+                                Background="{DynamicResource MahApps.Brushes.Accent4}">
+                        <Button Width="16" Height="16" Padding="0"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                ToolTip="Ereignis bearbeiten"
+                                Command="{Binding DataContext.EditEventCommand,
+                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}">
+                            <iconPacks:PackIconFontAwesome6 Kind="PencilSolid"
+                                    Width="10" Height="10"
+                                    Foreground="{DynamicResource MahApps.Brushes.Gray2}" />
+                        </Button>
+                        <Button Width="16" Height="16" Padding="0"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                ToolTip="Vorgemerktes Ereignis entfernen (wie in der Änderungsliste; abhängige Änderungen werden mit entfernt)"
+                                Command="{Binding DataContext.RemoveEventCommand,
+                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}">
+                            <iconPacks:PackIconFontAwesome6 Kind="XmarkSolid"
+                                    Width="11" Height="11" Foreground="Firebrick" />
+                        </Button>
                     </StackPanel>
-                </DockPanel>
+                </Grid>
             </Border>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding CitationCount}" Value="0">
@@ -160,7 +259,18 @@
                     <Setter TargetName="FactRow" Property="Background"
                             Value="{DynamicResource MahApps.Brushes.Accent4}" />
                     <Setter TargetName="FactLabel" Property="FontStyle" Value="Italic" />
+                    <Setter TargetName="FactRow" Property="ContextMenu"
+                            Value="{StaticResource PendingEventMenu}" />
                 </DataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsPendingNew}" Value="True" />
+                        <Condition Binding="{Binding IsMouseOver, ElementName=FactRow}"
+                                   Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter TargetName="RowButtons" Property="Visibility"
+                            Value="Visible" />
+                </MultiDataTrigger>
                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
                     <Setter TargetName="FactRow" Property="BorderBrush"
                             Value="{DynamicResource MahApps.Brushes.Accent}" />
@@ -190,7 +300,9 @@
                     BorderBrush="{DynamicResource MahApps.Brushes.Gray6}"
                     BorderThickness="1.3" CornerRadius="6" Padding="8,5"
                     Margin="0,3" Cursor="Hand"
-                    ToolTip="{Binding ToolTipText}">
+                    ToolTip="{Binding ToolTipText}"
+                    Tag="{Binding DataContext,
+                          RelativeSource={RelativeSource AncestorType=UserControl}}">
                 <Border.InputBindings>
                     <MouseBinding Gesture="LeftClick"
                                   Command="{Binding DataContext.SelectCardCommand,
@@ -201,26 +313,58 @@
                                             RelativeSource={RelativeSource AncestorType=UserControl}}"
                                   CommandParameter="{Binding}" />
                 </Border.InputBindings>
-                <DockPanel>
-                    <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
-                              Margin="0,0,6,0" IsHitTestVisible="False"
-                              Focusable="False"
-                              Visibility="{Binding ShowCheckBox,
-                                           Converter={StaticResource BoolToVisibility}}"
-                              IsChecked="{Binding IsChecked, Mode=OneWay}"
-                              IsEnabled="{Binding IsCheckEnabled}" />
-                    <StackPanel>
-                        <TextBlock Text="{Binding Title}" FontSize="12"
-                                   TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="SubtitleLine" Text="{Binding Subtitle}"
-                                   FontSize="11"
-                                   Foreground="{DynamicResource MahApps.Brushes.Gray3}"
-                                   TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="PageLine" Text="{Binding Page}"
-                                   FontSize="11"
-                                   TextTrimming="CharacterEllipsis" />
+                <Grid>
+                    <DockPanel>
+                        <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center"
+                                  Margin="0,0,6,0" IsHitTestVisible="False"
+                                  Focusable="False"
+                                  Visibility="{Binding ShowCheckBox,
+                                               Converter={StaticResource BoolToVisibility}}"
+                                  IsChecked="{Binding IsChecked, Mode=OneWay}"
+                                  IsEnabled="{Binding IsCheckEnabled}" />
+                        <StackPanel>
+                            <TextBlock Text="{Binding Title}" FontSize="12"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Name="SubtitleLine" Text="{Binding Subtitle}"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource MahApps.Brushes.Gray3}"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Name="PageLine" Text="{Binding Page}"
+                                       FontSize="11"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </DockPanel>
+                    <!-- hover-only edit/un-adopt, FINDING cards only:
+                         Seite + Kommentar live in the library; existing
+                         Gramps citations are read-only (no update API).
+                         The ✕ only removes the card from THIS person's
+                         view - the find stays in the tray (unlike the
+                         tray's ✕, which deletes it). -->
+                    <StackPanel x:Name="CardButtons" Orientation="Vertical"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Visibility="Collapsed"
+                                Background="{DynamicResource MahApps.Brushes.Accent4}">
+                        <Button Width="16" Height="16" Padding="0"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                ToolTip="Zitat bearbeiten (Seite und Kommentar)"
+                                Command="{Binding DataContext.EditCitationCommand,
+                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}">
+                            <iconPacks:PackIconFontAwesome6 Kind="PencilSolid"
+                                    Width="10" Height="10"
+                                    Foreground="{DynamicResource MahApps.Brushes.Gray2}" />
+                        </Button>
+                        <Button Width="16" Height="16" Padding="0"
+                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                                ToolTip="Aus dieser Ansicht entfernen — der Fund bleibt in der Ablage"
+                                Command="{Binding DataContext.UnadoptCommand,
+                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}">
+                            <iconPacks:PackIconFontAwesome6 Kind="XmarkSolid"
+                                    Width="11" Height="11" Foreground="Firebrick" />
+                        </Button>
                     </StackPanel>
-                </DockPanel>
+                </Grid>
             </Border>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding Subtitle}" Value="">
@@ -234,7 +378,18 @@
                 <DataTrigger Binding="{Binding IsFinding}" Value="True">
                     <Setter TargetName="Card" Property="Background"
                             Value="{DynamicResource MahApps.Brushes.Accent4}" />
+                    <Setter TargetName="Card" Property="ContextMenu"
+                            Value="{StaticResource FindingCardMenu}" />
                 </DataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsFinding}" Value="True" />
+                        <Condition Binding="{Binding IsMouseOver, ElementName=Card}"
+                                   Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter TargetName="CardButtons" Property="Visibility"
+                            Value="Visible" />
+                </MultiDataTrigger>
                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
                     <Setter TargetName="Card" Property="BorderBrush"
                             Value="{DynamicResource MahApps.Brushes.Accent}" />

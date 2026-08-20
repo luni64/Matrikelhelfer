@@ -22,8 +22,10 @@ static class EntryCsvExporter
     {
         var sb = new StringBuilder();
 
+        // No Name column since the field was removed (2026-08) - old names
+        // were folded into the comment by the library migration.
         AppendRow(sb,
-            "Gespeichert", "Name", "Kommentar",
+            "Gespeichert", "Kommentar",
             "Land", "Bistum", "Pfarrei", "Buchtyp", "DatumVon", "DatumBis",
             "Signatur", "SignaturPfarrei", "SignaturBuch",
             "Seite", "Scan-Nr", "Scan-ID", "SeitenUrl", "BuchUrl", "BildUrl",
@@ -33,7 +35,7 @@ static class EntryCsvExporter
         {
             var i = r.Info;
             AppendRow(sb,
-                r.SavedAt.ToString("yyyy-MM-dd HH:mm"), r.Name, r.Comment,
+                r.SavedAt.ToString("yyyy-MM-dd HH:mm"), r.Comment,
                 i.Land, i.Bistum, i.Pfarrei, i.Buchtyp, i.DatumVon, i.DatumBis,
                 i.Signatur, i.SignaturPfarrei, i.SignaturBuch,
                 i.Page ?? "", i.Scan.ToString(), i.ScanLabel, i.Url, i.BookUrl, i.ImageUrl,
