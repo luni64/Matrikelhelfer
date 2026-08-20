@@ -587,11 +587,32 @@ sealed class GrampsViewModel : GrampsObservable
         AfterChangesMutation($"Neue Person {node.DisplayName} vorgemerkt");
     }
 
-    static string SurnameOf(TreePerson person) =>
-        person.IsVirtual ? person.Surname
-        : person.DisplayName.Contains(' ')
-            ? person.DisplayName[(person.DisplayName.LastIndexOf(' ') + 1)..]
-            : "";
+    /// <summary>Surname for the dialog presets. Preferred source is the
+    /// STRUCTURED surname the bridge delivers in the person detail
+    /// (Gramps models names structured — no parsing needed). Brief-only
+    /// nodes fall back to parsing the display name: "Surname, Givens"
+    /// (Gramps' default format) takes the part before the comma, plain
+    /// "Givens Surname" the last token (same rule as
+    /// PersonBoxVM.ShortenName).</summary>
+    static string SurnameOf(TreePerson person)
+    {
+        if (person.IsVirtual)
+        {
+            return person.Surname;
+        }
+        if (person.ServerSurname.Length > 0)
+        {
+            return person.ServerSurname;
+        }
+        string name = person.DisplayName;
+        int comma = name.IndexOf(',');
+        if (comma > 0)
+        {
+            return name[..comma].Trim();
+        }
+        int lastSpace = name.LastIndexOf(' ');
+        return lastSpace < 0 ? "" : name[(lastSpace + 1)..];
+    }
 
     // ---- editing/removing PENDING items (pre-upload only) -------------
     // Real Gramps persons/events stay read-only here: the bridge has no

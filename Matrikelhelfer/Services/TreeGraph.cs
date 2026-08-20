@@ -32,6 +32,13 @@ sealed class TreePerson(string id)
 
     public string? GrampsId { get; set; }
     public string ServerName { get; set; } = "";       // real persons
+
+    /// <summary>The STRUCTURED surname from the bridge's person detail
+    /// (Gramps models names structured; only the display string needs
+    /// parsing). Empty for brief-only nodes — callers fall back to
+    /// parsing ServerName then.</summary>
+    public string ServerSurname { get; set; } = "";
+
     public string Given { get; set; } = "";            // virtual persons
     public string Surname { get; set; } = "";
     public string Gender { get; set; } = "U";
@@ -123,6 +130,8 @@ sealed class TreeGraph
     {
         var person = GetOrAddPerson(detail.Handle);
         person.ServerName = detail.PrimaryName;
+        person.ServerSurname = detail.Names
+            .FirstOrDefault(n => n.Primary)?.Surname ?? "";
         person.GrampsId = detail.GrampsId;
         person.Gender = detail.Gender;
         person.Birth = detail.Birth;
