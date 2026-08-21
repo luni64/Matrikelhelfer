@@ -48,7 +48,9 @@ public sealed record NameInfo(
 /// the Gramps-Modus link view (source cards + connector lines).</summary>
 public sealed record CitationRef(
     string Handle, string SourceHandle, string? SourceTitle,
-    string? SourceAbbrev, string? Page, string? DateText)
+    string? SourceAbbrev, string? Page, string? DateText,
+    long? Change = null,           // staleness guard for updates
+    string? Url = null)            // "Digitalisat" attribute (scan link)
 {
     /// <summary>Compact card label: abbreviation when maintained,
     /// else the full title (hand-made Gramps sources often have none).</summary>
@@ -64,7 +66,8 @@ public sealed record PersonEvent(
     string Handle, string GrampsId, string Type, string Role,
     string? DateText, int? SortYear, string? Place, string? Description,
     int CitationCount, string? Scope = null, string? FamilyHandle = null,
-    List<CitationRef>? Citations = null);
+    List<CitationRef>? Citations = null,
+    long? Change = null);          // staleness guard for updates/deletes
 
 public sealed record FamilyInfo(
     string Handle, string GrampsId, PersonBrief? Spouse, List<PersonBrief> Children)
@@ -81,7 +84,8 @@ public sealed record PersonDetail(
     List<PersonBrief> Parents, List<FamilyInfo> Families,
     LifeEvent? Birth = null, LifeEvent? Death = null,
     List<CitationRef>? Citations = null,
-    string? ParentFamilyHandle = null);
+    string? ParentFamilyHandle = null,
+    long? Change = null);          // staleness guard for updates
 
 // ---- /sources, /repositories (5.6) ----------------------------------
 
@@ -345,6 +349,28 @@ public sealed class BatchAttachSpec
     public required List<BatchTargetRef> Targets { get; set; }
 }
 
+/// <summary>Sparse update of an EXISTING Gramps object (persons:
+/// given/surname/gender; events: type/date/place/description). Only
+/// keys present in Set change - a null value clears the field.
+/// ExpectChange = the object's change time as read; the bridge aborts
+/// the whole batch with 409 CONFLICT when it moved since.</summary>
+public sealed class BatchUpdateSpec
+{
+    public required string Type { get; set; }       // "person" | "event"
+    public required string Handle { get; set; }
+    public long? ExpectChange { get; set; }
+    public required Dictionary<string, object?> Set { get; set; }
+}
+
+/// <summary>Delete of an EXISTING Gramps event (the only deletable
+/// type by design); the bridge removes all event_refs first.</summary>
+public sealed class BatchDeleteSpec
+{
+    public required string Type { get; set; }       // "event"
+    public required string Handle { get; set; }
+    public long? ExpectChange { get; set; }
+}
+
 public sealed class BatchRequest
 {
     public string? RequestId { get; set; }
@@ -353,6 +379,8 @@ public sealed class BatchRequest
     public List<BatchEventSpec> Events { get; set; } = [];
     public List<BatchCitationSpec> Citations { get; set; } = [];
     public List<BatchAttachSpec> Attach { get; set; } = [];
+    public List<BatchUpdateSpec> Updates { get; set; } = [];
+    public List<BatchDeleteSpec> Deletes { get; set; } = [];
 }
 
 public sealed record BatchCitationResult(

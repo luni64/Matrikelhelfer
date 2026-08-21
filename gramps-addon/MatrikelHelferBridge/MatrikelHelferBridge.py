@@ -29,7 +29,7 @@ class MatrikelHelferBridgeGramplet(Gramplet):
     def init(self):
         global _SERVICE
         if _SERVICE is None:
-            _SERVICE = BridgeService(self.dbstate)
+            _SERVICE = BridgeService(self.dbstate, uistate=self.uistate)
         self.service = _SERVICE
         self.service.add_listener(self._refresh)
         root = self._build_gui()

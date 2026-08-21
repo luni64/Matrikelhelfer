@@ -32,14 +32,17 @@ further objects).
 powershell -ExecutionPolicy Bypass -File gramps-addon\tests\run_tests.ps1
 ```
 
-Runs 52 integration tests headless inside the real Gramps runtime
+Runs 56 integration tests headless inside the real Gramps runtime
 (`grampsd.exe` CLI + a test tool plugin): auth/origin/content-type checks,
 person search and detail (incl. the per-event citations block),
 source/repository lookup, full capture, source reuse, idempotent replay,
 rollback on bad target, undo, attach-existing-citation, person creation
 (child/spouse/parent links, "@new" event owner, citation-less), and the
 capture-batch (full chain in one call, single undo, rollback,
-idempotent replay, event place by name — reused casefolded or created). Uses the
+idempotent replay, event place by name — reused casefolded or created,
+sparse updates of existing persons/events/citations, event delete with
+backlink cleanup, the expect_change staleness guard incl. its
+evaluate-before-own-commits regression, 409 CONFLICT rollback). Uses the
 dedicated **MHBridgeTest** tree (wiped and reseeded every run — the tool
 refuses any other tree), a separate port (8811) and a temp discovery file,
 so a running production bridge is unaffected. Gramps GUI must be closed
@@ -153,7 +156,7 @@ $body = @{
     page = "S. 42, Eintrag 7"
     date = @{ type = "regular"; year = 1780; month = 3; day = 12 }
     confidence = "normal"
-    attributes = @(@{ key = "MH_Permalink"; value = "https://data.matricula-online.eu/de/..." })
+    attributes = @(@{ key = "Digitalisat"; value = "https://data.matricula-online.eu/de/..." })
     notes = @(@{ type = "Citation"; text = "Transkription: Joannes, ehel. Sohn des ..." })
   }
   create_event_if_missing = @{
@@ -173,7 +176,9 @@ Checklist (maps to T-02…T-06 in the spec):
 
 1. In Gramps: the person has a new Baptism event with the citation attached;
    the source hangs under the Matricula repository; the note and the
-   `MH_Permalink` attribute are on the citation.
+   `Digitalisat` attribute are on the citation (renamed 2026-08 from
+   `MH_Permalink`, which is still read back — `MH_SourceKey` keeps its
+   name on purpose: it is the machine key source matching hangs on).
 2. **Replay**: send the exact same `$body` again → identical response,
    *no* new objects (FA-7). A *new* `request_id` with the same source key
    → new citation but `source.was_existing: true` (T-04).

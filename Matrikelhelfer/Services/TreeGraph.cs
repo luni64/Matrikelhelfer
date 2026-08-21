@@ -39,6 +39,13 @@ sealed class TreePerson(string id)
     /// parsing ServerName then.</summary>
     public string ServerSurname { get; set; } = "";
 
+    /// <summary>Structured given name from the detail (edit prefill).</summary>
+    public string ServerGiven { get; set; } = "";
+
+    /// <summary>Gramps change time as read — the staleness guard for
+    /// staged person edits (batch expect_change).</summary>
+    public long? Change { get; set; }
+
     public string Given { get; set; } = "";            // virtual persons
     public string Surname { get; set; } = "";
     public string Gender { get; set; } = "U";
@@ -92,6 +99,8 @@ sealed class TreeGraph
 
     public IEnumerable<TreeFamily> AllFamilies => _families.Values;
 
+    public IEnumerable<TreePerson> AllPersons => _persons.Values;
+
     public TreePerson? Person(string? id) =>
         id is not null && _persons.TryGetValue(id, out var person) ? person : null;
 
@@ -130,8 +139,10 @@ sealed class TreeGraph
     {
         var person = GetOrAddPerson(detail.Handle);
         person.ServerName = detail.PrimaryName;
-        person.ServerSurname = detail.Names
-            .FirstOrDefault(n => n.Primary)?.Surname ?? "";
+        var primaryName = detail.Names.FirstOrDefault(n => n.Primary);
+        person.ServerSurname = primaryName?.Surname ?? "";
+        person.ServerGiven = primaryName?.Given ?? "";
+        person.Change = detail.Change;
         person.GrampsId = detail.GrampsId;
         person.Gender = detail.Gender;
         person.Birth = detail.Birth;

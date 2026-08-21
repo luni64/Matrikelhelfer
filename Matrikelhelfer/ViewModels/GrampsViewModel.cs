@@ -28,6 +28,7 @@ sealed class GrampsViewModel : GrampsObservable
     readonly ObservableCollection<SavedEntry> _library;
     readonly Action<string> _setStatus;
     readonly Func<SavedEntry, SavedEntry?> _editCitation;
+    readonly Action<string> _openScan;
 
     readonly TreeGraph _graph = new();
     TreePerson? _centerNode;
@@ -41,15 +42,20 @@ sealed class GrampsViewModel : GrampsObservable
     // calls back OnFindingCitationChanged for the Gramps-side refresh. Its
     // return value is the entry now carrying the dialog's values (a NEW one
     // after "Als Kopie speichern"), so a copy can be adopted right away.
+    // openScan = MainViewModel.NavigateTo: drives the CONNECTED browser
+    // to a scan url (citation cards' Digitalisat attribute / a finding's
+    // page url).
     public GrampsViewModel(GrampsBackend backend,
                            ObservableCollection<SavedEntry> library,
                            Action<string> setStatus,
-                           Func<SavedEntry, SavedEntry?> editCitation)
+                           Func<SavedEntry, SavedEntry?> editCitation,
+                           Action<string> openScan)
     {
         _backend = backend;
         _library = library;
         _setStatus = setStatus;
         _editCitation = editCitation;
+        _openScan = openScan;
         SearchCommand = new RelayCommand(async void () => await SearchAsync(),
             () => _backend.IsConnected && _backend.TreeOpen);
         NavigateCommand = new RelayCommand<PersonBoxVM>(box =>
@@ -70,14 +76,32 @@ sealed class GrampsViewModel : GrampsObservable
             () => _backend.IsConnected && Changes.Count > 0);
         DeleteEntryCommand = new RelayCommand<GrampsChangeEntry>(e => { if (e is not null) DeleteEntry(e); });
         DeleteGroupCommand = new RelayCommand<GrampsChangeGroupVM>(g => { if (g is not null) DeleteGroup(g); });
-        EditPersonCommand = new RelayCommand<PersonBoxVM>(b => { if (b is not null) EditVirtualPerson(b); });
+        EditPersonCommand = new RelayCommand<PersonBoxVM>(b => { if (b is not null) EditPersonBox(b); });
         RemovePersonCommand = new RelayCommand<PersonBoxVM>(b => { if (b is not null) RemoveVirtualPerson(b); });
-        EditEventCommand = new RelayCommand<FactRowVM>(f => { if (f is not null) EditPendingEvent(f); });
-        RemoveEventCommand = new RelayCommand<FactRowVM>(f => { if (f is not null) RemovePendingEvent(f); });
-        EditCitationCommand = new RelayCommand<SourceCardVM>(c => { if (c is not null) EditFindingCitation(c); });
+        EditEventCommand = new RelayCommand<FactRowVM>(f => { if (f is not null) EditEventRow(f); });
+        RemoveEventCommand = new RelayCommand<FactRowVM>(f => { if (f is not null) RemoveEventRow(f); });
+        EditCitationCommand = new RelayCommand<SourceCardVM>(c => { if (c is not null) EditCitationCard(c); });
         UnadoptCommand = new RelayCommand<SourceCardVM>(c => { if (c is not null) UnadoptFinding(c); });
+        OpenCardScanCommand = new RelayCommand<SourceCardVM>(c => { if (c is not null) OpenCardScan(c); });
         ShowChangesCommand = new RelayCommand(ShowChanges, () => Changes.Count > 0);
+        RefreshCommand = new RelayCommand(async void () => await RefreshCenterAsync(),
+            () => _backend.IsConnected && _centerNode is { IsVirtual: false });
         Changes.CollectionChanged += (_, _) => OnChanged(nameof(ChangesSummary));
+    }
+
+    public ICommand RefreshCommand { get; }
+
+    /// <summary>Explicit reload of the centered person from Gramps —
+    /// THE remedy after a CONFLICT ("bitte neu laden") and after edits
+    /// made directly in Gramps; also re-arms the staleness guard of
+    /// staged corrections (see RefreshStagedExpectations).</summary>
+    async Task RefreshCenterAsync()
+    {
+        if (_centerNode is { IsVirtual: false } center)
+        {
+            await LoadCenterAsync(center.Id);
+            Status("Aus Gramps neu geladen.");
+        }
     }
 
     void Status(string text) => _setStatus(text);
@@ -248,6 +272,7 @@ sealed class GrampsViewModel : GrampsObservable
                 }
                 var detail = await _backend.GetPersonAsync(id);
                 node = _graph.UpsertDetail(detail);
+                RefreshStagedExpectations(detail);
                 _lastRealCenterId = id;
             }
             _centerNode = node;
@@ -270,11 +295,49 @@ sealed class GrampsViewModel : GrampsObservable
         {
             try
             {
-                _graph.UpsertDetail(await _backend.GetPersonAsync(partner.Id));
+                var detail = await _backend.GetPersonAsync(partner.Id);
+                _graph.UpsertDetail(detail);
+                RefreshStagedExpectations(detail);
             }
             catch (Exception)
             {
                 // brief data is good enough for the box
+            }
+        }
+    }
+
+    /// <summary>Re-arms the staleness guard after a fresh detail read:
+    /// staged corrections targeting the objects just read take the NEW
+    /// change times. The 409 CONFLICT exists to prevent BLIND overwrites
+    /// - once the user has re-loaded (the reload button, clicking the
+    /// center box, or any navigation) the current state is on screen and
+    /// the staged corrections apply against it. Sparse sets keep
+    /// outside edits to OTHER fields intact either way.</summary>
+    void RefreshStagedExpectations(PersonDetail detail)
+    {
+        var current = new Dictionary<string, long?> { [detail.Handle] = detail.Change };
+        foreach (var evt in detail.Events)
+        {
+            current[evt.Handle] = evt.Change;
+            foreach (var reference in evt.Citations ?? [])
+            {
+                current[reference.Handle] = reference.Change;
+            }
+        }
+        foreach (var reference in detail.Citations ?? [])
+        {
+            current[reference.Handle] = reference.Change;
+        }
+        foreach (var entry in Changes)
+        {
+            if (entry.Kind is GrampsChangeKind.EditPerson
+                    or GrampsChangeKind.EditEvent
+                    or GrampsChangeKind.DeleteEvent
+                    or GrampsChangeKind.EditExistingCitation
+                && entry.TargetHandle is { } handle
+                && current.TryGetValue(handle, out var change))
+            {
+                entry.ExpectChange = change;
             }
         }
     }
@@ -366,6 +429,44 @@ sealed class GrampsViewModel : GrampsObservable
         }
         childSpecs.Add(BoxSpec.NewSlot);
         SyncRow(ChildrenRow, childSpecs);
+        ApplyStagedPersonEdits();
+    }
+
+    /// <summary>Overlays staged EditPerson corrections onto the person
+    /// boxes (effective name, italic, tooltip line) so the tree never
+    /// drifts from what the upload will do — a reload shows the fresh
+    /// Gramps state WITH the staged correction on top, exactly like the
+    /// fact rows do. Runs after every RebuildRows; UpdateFromNode has
+    /// reset the boxes to the Gramps state first.</summary>
+    void ApplyStagedPersonEdits()
+    {
+        var staged = Changes
+            .Where(c => c.Kind == GrampsChangeKind.EditPerson
+                        && c.TargetHandle is not null)
+            .ToDictionary(c => c.TargetHandle!);
+        if (staged.Count == 0)
+        {
+            return;
+        }
+        IEnumerable<PersonBoxVM?> boxes =
+            [Center, Spouse, .. LeftParentsRow, .. RightParentsRow, .. ChildrenRow];
+        foreach (var box in boxes)
+        {
+            if (box is not { IsPlaceholder: false }
+                || !staged.TryGetValue(box.Id, out var entry)
+                || _graph.Person(box.Id) is not { } node)
+            {
+                continue;
+            }
+            string Effective(string key, string original) =>
+                entry.UpdateSet is { } set && set.TryGetValue(key, out var value)
+                    ? value as string ?? "" : original;
+            string given = Effective("given", node.ServerGiven);
+            string surname = Effective("surname", node.ServerSurname);
+            string effectiveName = surname.Length > 0 && given.Length > 0
+                ? $"{surname}, {given}" : surname + given;
+            box.ApplyStagedEdit(effectiveName, entry.EditSummary ?? "");
+        }
     }
 
     static List<BoxSpec> ParentSpecs(TreePerson? person)
@@ -616,19 +717,115 @@ sealed class GrampsViewModel : GrampsObservable
         return lastSpace < 0 ? "" : name[(lastSpace + 1)..];
     }
 
-    // ---- editing/removing PENDING items (pre-upload only) -------------
-    // Real Gramps persons/events stay read-only here: the bridge has no
-    // update API by design - they are edited in Gramps itself.
+    // ---- editing/removing persons & events ----------------------------
+    // Pending items are edited in place. EXISTING Gramps objects gained
+    // STAGED corrections 2026-08 (persons: name/gender; events:
+    // type/date/place/description + delete) - the additive-only rule was
+    // deliberately softened for exactly these, because they arise WHILE
+    // reading the book (a transcription typo, an imported duplicate
+    // birth). Everything else (person delete, sources, places) stays
+    // Gramps' own business. Staged = a change entry: reviewable,
+    // removable, uploaded in the ONE transaction, guarded by the
+    // object's change time (409 CONFLICT when Gramps edited it since).
 
     public ICommand EditPersonCommand { get; }
     public ICommand RemovePersonCommand { get; }
 
+    void EditPersonBox(PersonBoxVM box)
+    {
+        if (_graph.Person(box.Id) is not { } node)
+        {
+            return;
+        }
+        if (node.IsVirtual)
+        {
+            EditVirtualPerson(node);
+        }
+        else
+        {
+            EditRealPerson(node);
+        }
+    }
+
+    /// <summary>Stages a correction of an EXISTING person's name/gender
+    /// (same dialog as creation). The person box shows the EFFECTIVE
+    /// staged name in italics (ApplyStagedPersonEdits), the change list
+    /// carries the summary.</summary>
+    void EditRealPerson(TreePerson node)
+    {
+        // prefill = staged correction overlaid on the Gramps values, so
+        // reopening continues the correction; the sparse set is ALWAYS a
+        // diff against the ORIGINALS, so reverting un-stages
+        var staged = Changes.FirstOrDefault(c =>
+            c.Kind == GrampsChangeKind.EditPerson && c.TargetHandle == node.Id);
+        string StagedOr(string key, string original) =>
+            staged?.UpdateSet is { } stagedSet
+            && stagedSet.TryGetValue(key, out var value)
+                ? value as string ?? "" : original;
+        var dialog = new NewPersonDialog("Person in Gramps korrigieren",
+                                         StagedOr("given", node.ServerGiven),
+                                         StagedOr("surname", node.ServerSurname),
+                                         StagedOr("gender", node.Gender),
+                                         edit: true)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        var set = new Dictionary<string, object?>();
+        var summary = new List<string>();
+        if (dialog.Given != node.ServerGiven)
+        {
+            set["given"] = dialog.Given;
+            summary.Add($"Vorname → {dialog.Given}");
+        }
+        if (dialog.Surname != node.ServerSurname)
+        {
+            set["surname"] = dialog.Surname;
+            summary.Add($"Nachname → {dialog.Surname}");
+        }
+        if (dialog.Gender != node.Gender)
+        {
+            set["gender"] = dialog.Gender;
+            summary.Add($"Geschlecht → {dialog.Gender}");
+        }
+        if (staged is not null)
+        {
+            Changes.Remove(staged);   // replaced (or reverted) below
+        }
+        if (set.Count == 0)
+        {
+            if (staged is not null)
+            {
+                AfterChangesMutation("Korrektur aufgehoben");
+            }
+            else
+            {
+                Status("Keine Änderungen.");
+            }
+            return;
+        }
+        Changes.Add(new GrampsChangeEntry
+        {
+            Kind = GrampsChangeKind.EditPerson,
+            EntityKey = node.Id,
+            EntityLabel = node.DisplayName,
+            TargetHandle = node.Id,
+            TargetLabel = node.DisplayName,
+            ExpectChange = node.Change,
+            UpdateSet = set,
+            EditSummary = string.Join(" · ", summary),
+        });
+        AfterChangesMutation("Personen-Korrektur vorgemerkt");
+    }
+
     /// <summary>Edits a not-yet-uploaded virtual person (name/gender)
     /// via the NewPersonDialog in edit mode.</summary>
-    void EditVirtualPerson(PersonBoxVM box)
+    void EditVirtualPerson(TreePerson node)
     {
-        if (_graph.Person(box.Id) is not { IsVirtual: true } node
-            || Changes.FirstOrDefault(c => c.Id == node.EntryId)
+        if (Changes.FirstOrDefault(c => c.Id == node.EntryId)
                 is not { } entry)
         {
             return;
@@ -832,6 +1029,13 @@ sealed class GrampsViewModel : GrampsObservable
                    "Bridge bewusst nicht möglich.");
             return;
         }
+        if (Changes.Any(c => c.Kind == GrampsChangeKind.DeleteEvent
+                             && c.TargetHandle == fact.Id))
+        {
+            Status("Ereignis ist zum Löschen vorgemerkt – erst das " +
+                   "Löschen aufheben.");
+            return;
+        }
         var pending = card.IsFinding
             ? Changes.FirstOrDefault(c =>
                 c.Kind == GrampsChangeKind.AttachCitation
@@ -891,6 +1095,22 @@ sealed class GrampsViewModel : GrampsObservable
     {
         SyncSourceCards();
 
+        // staged page corrections preview on the citation cards
+        var citationStaged = Changes
+            .Where(c => c.Kind == GrampsChangeKind.EditExistingCitation
+                        && c.TargetHandle is not null)
+            .ToDictionary(c => c.TargetHandle!);
+        foreach (var card in SourceCards)
+        {
+            if (!card.IsFinding
+                && citationStaged.TryGetValue(card.Key, out var stagedPage)
+                && stagedPage.UpdateSet is { } stagedSet
+                && stagedSet.TryGetValue("page", out var value))
+            {
+                card.Subtitle = $"(korrigiert) {value as string ?? "(leer)"}";
+            }
+        }
+
         foreach (var card in SourceCards)
         {
             card.ExistingTargets.Clear();
@@ -946,8 +1166,26 @@ sealed class GrampsViewModel : GrampsObservable
         }
 
         var assignCard = CardByKey(_assignCardKey);
+        var deleteStaged = Changes
+            .Where(c => c.Kind == GrampsChangeKind.DeleteEvent
+                        && c.TargetHandle is not null)
+            .Select(c => c.TargetHandle!).ToHashSet();
+        var editStaged = Changes
+            .Where(c => c.Kind == GrampsChangeKind.EditEvent
+                        && c.TargetHandle is not null)
+            .ToDictionary(c => c.TargetHandle!);
         foreach (var fact in Facts)
         {
+            fact.IsPendingDelete = deleteStaged.Contains(fact.Id);
+            if (!fact.IsPendingNew
+                && editStaged.TryGetValue(fact.Id, out var stagedEdit))
+            {
+                fact.ApplyStagedEdit(stagedEdit);
+            }
+            else
+            {
+                fact.IsPendingEdit = false;
+            }
             fact.IsSelected = fact.Id == _selectedFactKey;
             fact.IsAssignSubject = fact.Id == _assignFactKey;
             fact.ShowCheckBox = assignCard is not null;
@@ -1048,6 +1286,100 @@ sealed class GrampsViewModel : GrampsObservable
 
     public ICommand EditCitationCommand { get; }
     public ICommand UnadoptCommand { get; }
+    public ICommand OpenCardScanCommand { get; }
+
+    void EditCitationCard(SourceCardVM card)
+    {
+        if (card.IsFinding)
+        {
+            EditFindingCitation(card);
+        }
+        else
+        {
+            EditExistingCitation(card);
+        }
+    }
+
+    /// <summary>Stages a page/Fundstelle correction of an EXISTING
+    /// Gramps citation ("ups, Seite war falsch") — sparse update with
+    /// the change-time guard, like the person/event corrections.</summary>
+    void EditExistingCitation(SourceCardVM card)
+    {
+        if (card.Citation is not { } reference || _centerNode is not { } center)
+        {
+            return;
+        }
+        string originalPage = reference.Page ?? "";
+        // prefill with a staged correction if one exists; diff vs the
+        // ORIGINAL, so typing the original back un-stages
+        var staged = Changes.FirstOrDefault(c =>
+            c.Kind == GrampsChangeKind.EditExistingCitation
+            && c.TargetHandle == reference.Handle);
+        string prefillPage = staged?.UpdateSet is { } stagedSet
+            && stagedSet.TryGetValue("page", out var value)
+                ? value as string ?? "" : originalPage;
+        var dialog = new CitationEditDialog(
+            reference.SourceTitle ?? reference.SourceLabel,
+            prefillPage, "", grampsCitation: true)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        string page = dialog.Seite.Trim();
+        if (staged is not null)
+        {
+            Changes.Remove(staged);   // replaced (or reverted) below
+        }
+        if (page == originalPage)
+        {
+            if (staged is not null)
+            {
+                AfterChangesMutation("Korrektur aufgehoben");
+            }
+            else
+            {
+                Status("Keine Änderungen.");
+            }
+            return;
+        }
+        Changes.Add(new GrampsChangeEntry
+        {
+            Kind = GrampsChangeKind.EditExistingCitation,
+            EntityKey = center.Id,
+            EntityLabel = center.DisplayName,
+            TargetHandle = reference.Handle,
+            TargetLabel = reference.SourceLabel,
+            ExpectChange = reference.Change,
+            UpdateSet = new Dictionary<string, object?>
+            {
+                ["page"] = page.Length == 0 ? null : page,
+            },
+            EditSummary =
+                $"Fundstelle → {(page.Length == 0 ? "(leer)" : page)}",
+        });
+        AfterChangesMutation("Zitat-Korrektur vorgemerkt");
+    }
+
+    /// <summary>Drives the connected browser to the card's scan: a
+    /// finding card uses its saved page url, an existing-citation card
+    /// the Digitalisat attribute the app stored at capture time (hand-made
+    /// Gramps citations have none).</summary>
+    void OpenCardScan(SourceCardVM card)
+    {
+        string? url = card.IsFinding
+            ? (card.FindingId is { } id
+                   ? FindLibraryEntry(id)?.Info.EffectivePageUrl : null)
+            : card.Citation?.Url;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            Status("Dieses Zitat trägt keinen Scan-Link.");
+            return;
+        }
+        _openScan(url);
+    }
 
     /// <summary>Edits the citation-level fields of a FINDING card: Seite
     /// (a page field the scrape cannot deliver) and Kommentar (becomes
@@ -1138,6 +1470,7 @@ sealed class GrampsViewModel : GrampsObservable
 
     static void UpdateCitationCard(SourceCardVM card, CitationRef reference)
     {
+        card.Citation = reference;
         card.Title = reference.SourceLabel;
         card.Subtitle = reference.Page ?? "";
         card.Page = "";
@@ -1361,6 +1694,233 @@ sealed class GrampsViewModel : GrampsObservable
 
     public ICommand EditEventCommand { get; }
     public ICommand RemoveEventCommand { get; }
+
+    /// <summary>Change-list label for an existing event, derived from
+    /// the Gramps DTO — fact.Label may already carry the "(korrigiert)"
+    /// overlay and must not leak into entry labels.</summary>
+    static string EventLabelOf(PersonEvent evt)
+    {
+        string name = evt.Type + (evt.Scope == "family" ? "  [Familie]" : "");
+        string? place = evt.Place?.Split(',')[0].Trim();
+        return (name + " " + string.Join(" ", new[] { evt.DateText, place }
+            .Where(part => part is { Length: > 0 }))).Trim();
+    }
+
+    void EditEventRow(FactRowVM fact)
+    {
+        if (fact.IsPendingNew)
+        {
+            EditPendingEvent(fact);
+        }
+        else
+        {
+            EditRealEvent(fact);
+        }
+    }
+
+    void RemoveEventRow(FactRowVM fact)
+    {
+        if (fact.IsPendingNew)
+        {
+            RemovePendingEvent(fact);
+        }
+        else
+        {
+            ToggleDeleteRealEvent(fact);
+        }
+    }
+
+    /// <summary>Stages a correction of an EXISTING event via the same
+    /// dialog. SPARSE by design: only fields the user actually changed
+    /// go into the update - an untouched (localized, unparseable) Gramps
+    /// date is never round-tripped and clobbered. A changed date must
+    /// parse (jjjj[-mm[-tt]]); emptying it clears the Gramps date.</summary>
+    void EditRealEvent(FactRowVM fact)
+    {
+        if (fact.Source is not { } evt || EventTypeChoices.Count == 0)
+        {
+            return;
+        }
+        if (Changes.Any(c => c.Kind == GrampsChangeKind.DeleteEvent
+                             && c.TargetHandle == fact.Id))
+        {
+            Status("Ereignis ist zum Löschen vorgemerkt.");
+            return;
+        }
+        bool isFamily = fact.Scope == "family";
+        var choices = EventTypeChoices
+            .Where(c => c.IsFamily == isFamily).ToList();
+        string originalDate = evt.DateText ?? "";
+        string originalPlace = evt.Place ?? "";
+        string originalDescription = evt.Description ?? "";
+
+        // Prefill with the EFFECTIVE state - an already-staged correction
+        // overlaid on the Gramps values - so reopening the dialog
+        // continues the correction instead of showing the untouched
+        // original. The staged entry stores effective values for ALL
+        // fields (changed or not), "" meaning cleared.
+        var staged = Changes.FirstOrDefault(c =>
+            c.Kind == GrampsChangeKind.EditEvent && c.TargetHandle == fact.Id);
+        var (prefillDateType, prefillDateText) = EventTypeDialog
+            .SplitDateDisplay(staged?.EventDateText ?? originalDate);
+        string prefillLabel = staged?.EventTypeLabel ?? evt.Type;
+        var dialog = new EventTypeDialog(choices,
+                                         choices.FirstOrDefault(
+                                             c => c.Label == prefillLabel),
+                                         prefillDateText,
+                                         staged?.EventDescription
+                                             ?? originalDescription,
+                                         staged?.EventPlace ?? originalPlace,
+                                         prefillDateType, edit: true)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        if (dialog.ShowDialog() != true || dialog.SelectedType is not { } choice)
+        {
+            return;
+        }
+
+        // The sparse set is ALWAYS a diff against the Gramps originals
+        // (never against a previous staged state) - reverting a field to
+        // the original drops it from the set, an empty set un-stages.
+        var set = new Dictionary<string, object?>();
+        var summary = new List<string>();
+        if (choice.Label != evt.Type)
+        {
+            set["type"] = choice.Xml;
+            summary.Add($"Typ → {choice.Label}");
+        }
+        // compare display-to-display so a qualified original ("vor 1757")
+        // round-trips through the split modifier + text unchanged
+        if (dialog.DateDisplay != originalDate)
+        {
+            if (dialog.DateText.Length == 0)
+            {
+                set["date"] = null;
+                summary.Add("Datum → (leer)");
+            }
+            else
+            {
+                var date = ParseDate(dialog.DateText);
+                if (date is null)
+                {
+                    Status("Datum nicht erkannt (jjjj, jjjj-mm oder " +
+                           "jjjj-mm-tt) – nichts vorgemerkt.");
+                    return;
+                }
+                date.Type = dialog.DateType;
+                set["date"] = date;
+                summary.Add($"Datum → {dialog.DateDisplay}");
+            }
+        }
+        if (dialog.Place != originalPlace)
+        {
+            set["place"] = dialog.Place.Length == 0
+                ? null : new PlaceSpec { Title = dialog.Place };
+            summary.Add($"Ort → {(dialog.Place.Length == 0 ? "(leer)" : dialog.Place)}");
+        }
+        string description = dialog.Description.Trim();
+        if (description != originalDescription)
+        {
+            set["description"] = description.Length == 0 ? null : description;
+            summary.Add($"Beschreibung → {(description.Length == 0 ? "(leer)" : description)}");
+        }
+
+        if (staged is not null)
+        {
+            Changes.Remove(staged);   // replaced (or reverted) below
+        }
+        if (set.Count == 0)
+        {
+            if (staged is not null)
+            {
+                AfterChangesMutation("Korrektur aufgehoben");
+            }
+            else
+            {
+                Status("Keine Änderungen.");
+            }
+            return;
+        }
+        var (entityKey, entityLabel) = FactEntity(fact);
+        Changes.Add(new GrampsChangeEntry
+        {
+            Kind = GrampsChangeKind.EditEvent,
+            EntityKey = entityKey,
+            EntityLabel = entityLabel,
+            TargetHandle = fact.Id,
+            TargetLabel = EventLabelOf(evt),
+            ExpectChange = evt.Change,
+            UpdateSet = set,
+            EditSummary = string.Join(" · ", summary),
+            // effective values for the row overlay and the next reopen
+            EventTypeLabel = choice.Label,
+            EventDateText = dialog.DateDisplay,
+            EventPlace = dialog.Place,
+            EventDescription = description,
+        });
+        AfterChangesMutation("Ereignis-Korrektur vorgemerkt");
+    }
+
+    /// <summary>Stages (or, on the second click, un-stages) the deletion
+    /// of an EXISTING event. Staged citation assignments to it go with
+    /// it (confirmed) - they would target a vanishing object. The row
+    /// renders struck-through while the delete is staged.</summary>
+    void ToggleDeleteRealEvent(FactRowVM fact)
+    {
+        if (Changes.FirstOrDefault(c =>
+                c.Kind == GrampsChangeKind.DeleteEvent
+                && c.TargetHandle == fact.Id) is { } staged)
+        {
+            Changes.Remove(staged);
+            AfterChangesMutation("Löschen aufgehoben");
+            return;
+        }
+        if (fact.Source is not { } evt)
+        {
+            return;
+        }
+        var attached = Changes.Where(c =>
+            c.Kind is GrampsChangeKind.AttachCitation
+                or GrampsChangeKind.AttachExisting
+            && c.TargetHandle == fact.Id).ToList();
+        if (attached.Count > 0)
+        {
+            var answer = System.Windows.MessageBox.Show(
+                $"Entfernt auch {attached.Count} vorgemerkte Zuordnung(en) zu " +
+                "diesem Ereignis. Fortfahren?",
+                "Ereignis löschen", System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question);
+            if (answer != System.Windows.MessageBoxResult.Yes)
+            {
+                return;
+            }
+            foreach (var entry in attached)
+            {
+                Changes.Remove(entry);
+            }
+        }
+        // a staged edit of the same event is moot once it is deleted
+        foreach (var stale in Changes.Where(c =>
+                     c.Kind == GrampsChangeKind.EditEvent
+                     && c.TargetHandle == fact.Id).ToList())
+        {
+            Changes.Remove(stale);
+        }
+        var (entityKey, entityLabel) = FactEntity(fact);
+        Changes.Add(new GrampsChangeEntry
+        {
+            Kind = GrampsChangeKind.DeleteEvent,
+            EntityKey = entityKey,
+            EntityLabel = entityLabel,
+            TargetHandle = fact.Id,
+            TargetLabel = EventLabelOf(evt),
+            ExpectChange = evt.Change,
+            EditSummary = evt.CitationCount > 0
+                ? $"trägt {evt.CitationCount} Zitat(e)" : null,
+        });
+        AfterChangesMutation("Löschen vorgemerkt (nochmal ✕ hebt es auf)");
+    }
 
     /// <summary>Edits a pending "(neu)" event via the EventTypeDialog in
     /// edit mode. The type list is FILTERED to the entry's scope: a
@@ -1675,7 +2235,10 @@ sealed class GrampsViewModel : GrampsObservable
             Confidence = confidence,
             Attributes = string.IsNullOrWhiteSpace(info.EffectivePageUrl)
                 ? null
-                : [new AttributeKV("MH_Permalink", info.EffectivePageUrl)],
+                // "Digitalisat" (renamed from MH_Permalink 2026-08): a
+                // neutral, self-explanatory attribute name in the Gramps
+                // citation editor; the bridge reads both keys back
+                : [new AttributeKV("Digitalisat", info.EffectivePageUrl)],
             Notes = string.IsNullOrWhiteSpace(entry.Finding.Comment)
                 ? null
                 : [new NoteSpec { Type = "Citation", Text = entry.Finding.Comment }],
@@ -1697,6 +2260,63 @@ sealed class GrampsViewModel : GrampsObservable
         : info.Url.Contains("archion.de", StringComparison.OrdinalIgnoreCase)
             ? ("ARCHION", "https://www.archion.de/")
         : (NullIfEmpty(info.Bistum) ?? "Digitalisat-Archiv", null);
+
+    /// <summary>Re-reads every person whose objects carry staged
+    /// corrections and re-arms their expect_change (see SendAllAsync).
+    /// Person ids come from the entries: EditPerson targets a person
+    /// directly; event/citation corrections carry the owning person as
+    /// EntityKey (a FAMILY handle for family events — any real partner's
+    /// detail contains those events). A failed fetch leaves the old
+    /// expectation armed, so the bridge-side guard still protects.</summary>
+    async Task RefreshExpectationsBeforeSendAsync()
+    {
+        var personIds = new HashSet<string>();
+        foreach (var entry in Changes)
+        {
+            switch (entry.Kind)
+            {
+                case GrampsChangeKind.EditPerson:
+                    if (entry.TargetHandle is { } person)
+                    {
+                        personIds.Add(person);
+                    }
+                    break;
+                case GrampsChangeKind.EditEvent:
+                case GrampsChangeKind.DeleteEvent:
+                case GrampsChangeKind.EditExistingCitation:
+                    if (_graph.Family(entry.EntityKey) is { } family)
+                    {
+                        var partner = family.Father ?? family.Mother;
+                        if (partner is { IsVirtual: false })
+                        {
+                            personIds.Add(partner.Id);
+                        }
+                    }
+                    else if (_graph.Person(entry.EntityKey) is { IsVirtual: false })
+                    {
+                        personIds.Add(entry.EntityKey);
+                    }
+                    break;
+            }
+        }
+        foreach (string id in personIds)
+        {
+            try
+            {
+                var detail = await _backend.GetPersonAsync(id);
+                _graph.UpsertDetail(detail);
+                RefreshStagedExpectations(detail);
+            }
+            catch (Exception)
+            {
+                // guard stays armed with the previously read value
+            }
+        }
+        if (personIds.Count > 0)
+        {
+            RebuildAll();   // keep the display on the fresh read
+        }
+    }
 
     /// <summary>Serializes the change list + the virtual subgraph into
     /// one batch. Throws with a user message when a referenced finding
@@ -1828,6 +2448,36 @@ sealed class GrampsViewModel : GrampsObservable
                 }).ToList(),
             });
         }
+
+        // staged corrections of existing objects (run last in the bridge)
+        foreach (var entry in Changes.Where(c =>
+                     c.Kind is GrampsChangeKind.EditPerson
+                         or GrampsChangeKind.EditEvent
+                         or GrampsChangeKind.EditExistingCitation))
+        {
+            request.Updates.Add(new BatchUpdateSpec
+            {
+                Type = entry.Kind switch
+                {
+                    GrampsChangeKind.EditPerson => "person",
+                    GrampsChangeKind.EditEvent => "event",
+                    _ => "citation",
+                },
+                Handle = entry.TargetHandle!,
+                ExpectChange = entry.ExpectChange,
+                Set = entry.UpdateSet!,
+            });
+        }
+        foreach (var entry in Changes.Where(c =>
+                     c.Kind == GrampsChangeKind.DeleteEvent))
+        {
+            request.Deletes.Add(new BatchDeleteSpec
+            {
+                Type = "event",
+                Handle = entry.TargetHandle!,
+                ExpectChange = entry.ExpectChange,
+            });
+        }
         return request;
     }
 
@@ -1837,6 +2487,15 @@ sealed class GrampsViewModel : GrampsObservable
         {
             return;
         }
+        // Auto-reload the affected persons right before building the
+        // batch: staged corrections then apply against the CURRENT
+        // Gramps state (expect_change re-armed), so the CONFLICT guard
+        // only fires on a genuine race - the user never has to reload by
+        // hand. Safe because the UI always shows the effective staged
+        // state anyway: a Gramps-side edit to the SAME field loses to
+        // the staged correction (which is what the display promised),
+        // edits to other fields survive via the sparse updates.
+        await RefreshExpectationsBeforeSendAsync();
         BatchRequest request;
         try
         {
@@ -1844,7 +2503,13 @@ sealed class GrampsViewModel : GrampsObservable
         }
         catch (Exception ex)
         {
+            // failures that leave NOTHING saved must shout, not whisper
+            // in the status bar (field feedback 2026-08)
             Status("Upload nicht möglich: " + ex.Message);
+            System.Windows.MessageBox.Show(
+                "Es wurde nichts nach Gramps geschrieben.\n\n" + ex.Message,
+                "Upload nicht möglich", System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
             return;
         }
         try
@@ -1867,6 +2532,22 @@ sealed class GrampsViewModel : GrampsObservable
                 }
             }
 
+            // The uploaded findings have ARRIVED as Gramps citations -
+            // drop their adoptions, or the re-read would show the same
+            // find twice (the staged card next to the real citation
+            // card). Findings that were adopted but never assigned stay
+            // staged; a copy with its own note is a different id and
+            // stays too.
+            var uploadedFindings = Changes
+                .Where(c => c.FindingId is not null
+                            && c.Kind is GrampsChangeKind.AttachCitation
+                                or GrampsChangeKind.CreateEvent)
+                .Select(c => c.FindingId!.Value).ToHashSet();
+            foreach (var person in _graph.AllPersons)
+            {
+                person.AdoptedFindings.RemoveAll(uploadedFindings.Contains);
+            }
+
             int count = Changes.Count;
             Changes.Clear();
             if (_centerNode is not null)
@@ -1879,13 +2560,21 @@ sealed class GrampsViewModel : GrampsObservable
         }
         catch (Exception ex)
         {
-            string message = ex is BridgeException bridge
-                ? $"{bridge.Code}: {bridge.Message}" : ex.Message;
+            // BridgeException.Message already carries "CODE: text"
+            string message = ex.Message;
             foreach (var entry in Changes)
             {
                 entry.Error = "Stapel fehlgeschlagen: " + message;
             }
             Status("Upload fehlgeschlagen – nichts geschrieben: " + message);
+            // a failed upload leaves NOTHING saved - that must shout,
+            // not whisper in the status bar (field feedback 2026-08);
+            // the change list stays complete for the retry
+            System.Windows.MessageBox.Show(
+                "Es wurde nichts nach Gramps geschrieben – die "
+                + "Änderungsliste bleibt vollständig erhalten.\n\n" + message,
+                "Upload fehlgeschlagen", System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
         }
     }
 

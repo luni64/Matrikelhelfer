@@ -10,11 +10,12 @@
     <StackPanel Margin="12">
         <TextBlock x:Name="ContextLine" FontWeight="SemiBold" Margin="0,0,0,8"
                    TextWrapping="Wrap" />
-        <Label Content="Seite (handschriftliche Nummer):" Padding="0,0,0,2" />
+        <Label x:Name="SeiteLabel" Content="Seite (handschriftliche Nummer):"
+               Padding="0,0,0,2" />
         <TextBox x:Name="SeiteBox" VerticalContentAlignment="Center"
                  Margin="0,0,0,6"
                  ToolTip="Die echte handschriftliche Seitennummer — sie kann nicht ausgelesen werden. Leer = Seite unbekannt." />
-        <Label Content="Notiz:" Padding="0,0,0,2" />
+        <Label x:Name="NoteLabel" Content="Notiz:" Padding="0,0,0,2" />
         <TextBox x:Name="CommentBox" AcceptsReturn="True" TextWrapping="Wrap"
                  MinHeight="60" MaxHeight="140"
                  VerticalScrollBarVisibility="Auto" Margin="0,0,0,10"
@@ -24,8 +25,8 @@
                  comment (e.g. a different note for another person); the
                  original find keeps its comment, a corrected Seite reaches
                  both (page fact). -->
-            <Button DockPanel.Dock="Left" Content="Als Kopie speichern"
-                    Padding="14,4"
+            <Button x:Name="CopyButton" DockPanel.Dock="Left"
+                    Content="Als Kopie speichern" Padding="14,4"
                     ToolTip="Legt einen neuen Fund auf derselben Seite mit dieser Notiz an — der bestehende Fund bleibt unverändert."
                     Click="SaveAsCopy_Click" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">

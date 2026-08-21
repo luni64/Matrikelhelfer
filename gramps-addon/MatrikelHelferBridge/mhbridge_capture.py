@@ -34,6 +34,12 @@ class InvalidPayload(Exception):
     """Maps to 400 INVALID_REQUEST in the HTTP layer."""
 
 
+class StaleObject(Exception):
+    """Maps to 409 CONFLICT: an update/delete carried an expect_change
+    timestamp and the object changed in Gramps since the client read it
+    - the client must re-read instead of overwriting a newer edit."""
+
+
 # -- date building (5.9) ---------------------------------------------
 
 _MODIFIERS = {

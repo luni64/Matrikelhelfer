@@ -24,7 +24,20 @@
                                 RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                       CommandParameter="{Binding}" />
         </ContextMenu>
+        <!-- existing Gramps persons: edit stages a name/gender
+             correction; no Entfernen - persons are never deleted
+             through the bridge -->
+        <ContextMenu x:Key="RealPersonMenu">
+            <MenuItem Header="Bearbeiten…"
+                      Command="{Binding PlacementTarget.Tag.EditPersonCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+        </ContextMenu>
         <ContextMenu x:Key="FindingCardMenu">
+            <MenuItem Header="Im Browser öffnen"
+                      Command="{Binding PlacementTarget.Tag.OpenCardScanCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
             <MenuItem Header="Zitat bearbeiten…"
                       Command="{Binding PlacementTarget.Tag.EditCitationCommand,
                                 RelativeSource={RelativeSource AncestorType=ContextMenu}}"
@@ -34,7 +47,23 @@
                                 RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                       CommandParameter="{Binding}" />
         </ContextMenu>
-        <ContextMenu x:Key="PendingEventMenu">
+        <!-- existing Gramps citations: the scan link is the Digitalisat
+             attribute stored at capture time; Korrigieren stages a page
+             fix -->
+        <ContextMenu x:Key="CitationCardMenu">
+            <MenuItem Header="Im Browser öffnen"
+                      Command="{Binding PlacementTarget.Tag.OpenCardScanCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+            <MenuItem Header="Korrigieren…"
+                      Command="{Binding PlacementTarget.Tag.EditCitationCommand,
+                                RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}" />
+        </ContextMenu>
+        <!-- serves BOTH row kinds - the commands route: pending "(neu)"
+             rows edit/remove in place, existing Gramps events get a
+             STAGED correction/deletion in the change list -->
+        <ContextMenu x:Key="EventRowMenu">
             <MenuItem Header="Bearbeiten…"
                       Command="{Binding PlacementTarget.Tag.EditEventCommand,
                                 RelativeSource={RelativeSource AncestorType=ContextMenu}}"
@@ -60,6 +89,7 @@
                     BorderThickness="1.3"
                     Width="104" Height="40" Cursor="Hand"
                     ToolTip="{Binding ToolTipText}"
+                    ContextMenu="{StaticResource RealPersonMenu}"
                     Tag="{Binding DataContext,
                           RelativeSource={RelativeSource AncestorType=UserControl}}">
                 <Border.InputBindings>
@@ -85,17 +115,20 @@
                                    TextTrimming="CharacterEllipsis" TextAlignment="Center"
                                    Visibility="Collapsed" />
                     </StackPanel>
-                    <!-- hover-only edit/remove for the CENTERED virtual
-                         person: editing works from the large box (small
-                         boxes have no room - center a person to edit it);
-                         the context menu covers every virtual box -->
+                    <!-- hover-only edit/remove for the CENTERED person:
+                         editing works from the large box (small boxes have
+                         no room - center a person to edit it). The pencil
+                         serves BOTH kinds: virtual persons edit in place,
+                         existing Gramps persons get a STAGED correction
+                         (name/gender). The x removes only virtual persons
+                         - persons are never deleted through the bridge. -->
                     <StackPanel x:Name="EditButtons" Orientation="Vertical"
                                 HorizontalAlignment="Right" VerticalAlignment="Top"
                                 Visibility="Collapsed"
                                 Background="{DynamicResource MahApps.Brushes.Accent4}">
                         <Button Width="16" Height="16" Padding="0"
                                 Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                                ToolTip="Person bearbeiten"
+                                ToolTip="Person bearbeiten — bei bestehenden Gramps-Personen wird die Korrektur (Name/Geschlecht) in der Änderungsliste vorgemerkt"
                                 Command="{Binding DataContext.EditPersonCommand,
                                           RelativeSource={RelativeSource AncestorType=UserControl}}"
                                 CommandParameter="{Binding}">
@@ -104,11 +137,20 @@
                                     Foreground="{DynamicResource MahApps.Brushes.Gray2}" />
                         </Button>
                         <Button Width="16" Height="16" Padding="0"
-                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                                ToolTip="Neue Person entfernen (wie in der Änderungsliste; abhängige Änderungen werden mit entfernt)"
                                 Command="{Binding DataContext.RemovePersonCommand,
                                           RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                CommandParameter="{Binding}">
+                                CommandParameter="{Binding}"
+                                ToolTip="Neue Person entfernen (wie in der Änderungsliste; abhängige Änderungen werden mit entfernt)">
+                            <Button.Style>
+                                <Style TargetType="Button"
+                                       BasedOn="{StaticResource MahApps.Styles.Button.Chromeless}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsVirtual}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
                             <iconPacks:PackIconFontAwesome6 Kind="XmarkSolid"
                                     Width="11" Height="11" Foreground="Firebrick" />
                         </Button>
@@ -131,6 +173,11 @@
                     <Setter TargetName="NameLine" Property="Foreground"
                             Value="{DynamicResource MahApps.Brushes.Accent}" />
                 </DataTrigger>
+                <!-- staged name/gender correction: the box shows the
+                     EFFECTIVE name, marked italic (details in tooltip) -->
+                <DataTrigger Binding="{Binding IsPendingEdit}" Value="True">
+                    <Setter TargetName="NameLine" Property="FontStyle" Value="Italic" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsVirtual}" Value="True">
                     <Setter TargetName="Box" Property="BorderBrush"
                             Value="{DynamicResource MahApps.Brushes.Accent}" />
@@ -141,7 +188,6 @@
                 </DataTrigger>
                 <MultiDataTrigger>
                     <MultiDataTrigger.Conditions>
-                        <Condition Binding="{Binding IsVirtual}" Value="True" />
                         <Condition Binding="{Binding IsCenter}" Value="True" />
                         <Condition Binding="{Binding IsMouseOver, ElementName=Box}"
                                    Value="True" />
@@ -154,6 +200,8 @@
                             Value="{DynamicResource MahApps.Brushes.Gray7}" />
                     <Setter TargetName="Box" Property="Background"
                             Value="{DynamicResource MahApps.Brushes.Gray10}" />
+                    <Setter TargetName="Box" Property="ContextMenu"
+                            Value="{x:Null}" />
                     <Setter TargetName="Box" Property="ToolTip"
                             Value="Neue Person in diesem Platz anlegen" />
                     <Setter TargetName="NameLine" Property="Foreground"
@@ -187,6 +235,7 @@
                     BorderBrush="{DynamicResource MahApps.Brushes.Gray6}"
                     BorderThickness="1.3" CornerRadius="6" Padding="8,5"
                     Margin="0,3" Cursor="Hand"
+                    ContextMenu="{StaticResource EventRowMenu}"
                     Tag="{Binding DataContext,
                           RelativeSource={RelativeSource AncestorType=UserControl}}">
                 <Border.InputBindings>
@@ -223,15 +272,17 @@
                             </DockPanel>
                         </StackPanel>
                     </DockPanel>
-                    <!-- hover-only edit/remove, pending "(neu)" events only
-                         (real Gramps events are edited in Gramps) -->
+                    <!-- hover-only edit/remove on EVERY row: pending
+                         "(neu)" events edit/remove in place, existing
+                         Gramps events get a STAGED correction/deletion
+                         (x toggles the staged delete) -->
                     <StackPanel x:Name="RowButtons" Orientation="Vertical"
                                 HorizontalAlignment="Right" VerticalAlignment="Top"
                                 Visibility="Collapsed"
                                 Background="{DynamicResource MahApps.Brushes.Accent4}">
                         <Button Width="16" Height="16" Padding="0"
                                 Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                                ToolTip="Ereignis bearbeiten"
+                                ToolTip="Ereignis bearbeiten — bei bestehenden Gramps-Ereignissen wird die Korrektur in der Änderungsliste vorgemerkt"
                                 Command="{Binding DataContext.EditEventCommand,
                                           RelativeSource={RelativeSource AncestorType=UserControl}}"
                                 CommandParameter="{Binding}">
@@ -241,7 +292,7 @@
                         </Button>
                         <Button Width="16" Height="16" Padding="0"
                                 Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                                ToolTip="Vorgemerktes Ereignis entfernen (wie in der Änderungsliste; abhängige Änderungen werden mit entfernt)"
+                                ToolTip="Ereignis entfernen — bestehende Gramps-Ereignisse werden zum Löschen vorgemerkt (nochmal ✕ hebt es auf)"
                                 Command="{Binding DataContext.RemoveEventCommand,
                                           RelativeSource={RelativeSource AncestorType=UserControl}}"
                                 CommandParameter="{Binding}">
@@ -259,18 +310,24 @@
                     <Setter TargetName="FactRow" Property="Background"
                             Value="{DynamicResource MahApps.Brushes.Accent4}" />
                     <Setter TargetName="FactLabel" Property="FontStyle" Value="Italic" />
-                    <Setter TargetName="FactRow" Property="ContextMenu"
-                            Value="{StaticResource PendingEventMenu}" />
                 </DataTrigger>
-                <MultiDataTrigger>
-                    <MultiDataTrigger.Conditions>
-                        <Condition Binding="{Binding IsPendingNew}" Value="True" />
-                        <Condition Binding="{Binding IsMouseOver, ElementName=FactRow}"
-                                   Value="True" />
-                    </MultiDataTrigger.Conditions>
+                <!-- staged correction: the row shows the EFFECTIVE values
+                     ("(korrigiert) ..."), italic like pending-new rows -->
+                <DataTrigger Binding="{Binding IsPendingEdit}" Value="True">
+                    <Setter TargetName="FactLabel" Property="FontStyle" Value="Italic" />
+                </DataTrigger>
+                <!-- staged deletion: struck through and dimmed until the
+                     upload (or until the x un-stages it) -->
+                <DataTrigger Binding="{Binding IsPendingDelete}" Value="True">
+                    <Setter TargetName="FactLabel" Property="TextDecorations"
+                            Value="Strikethrough" />
+                    <Setter TargetName="FactRow" Property="Opacity" Value="0.55" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsMouseOver, ElementName=FactRow}"
+                             Value="True">
                     <Setter TargetName="RowButtons" Property="Visibility"
                             Value="Visible" />
-                </MultiDataTrigger>
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
                     <Setter TargetName="FactRow" Property="BorderBrush"
                             Value="{DynamicResource MahApps.Brushes.Accent}" />
@@ -301,6 +358,7 @@
                     BorderThickness="1.3" CornerRadius="6" Padding="8,5"
                     Margin="0,3" Cursor="Hand"
                     ToolTip="{Binding ToolTipText}"
+                    ContextMenu="{StaticResource CitationCardMenu}"
                     Tag="{Binding DataContext,
                           RelativeSource={RelativeSource AncestorType=UserControl}}">
                 <Border.InputBindings>
@@ -334,19 +392,19 @@
                                        TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </DockPanel>
-                    <!-- hover-only edit/un-adopt, FINDING cards only:
-                         Seite + Kommentar live in the library; existing
-                         Gramps citations are read-only (no update API).
-                         The ✕ only removes the card from THIS person's
-                         view - the find stays in the tray (unlike the
-                         tray's ✕, which deletes it). -->
+                    <!-- hover-only buttons on EVERY card: the pencil
+                         edits a finding's Seite/Notiz directly or stages
+                         a page correction on an existing Gramps citation;
+                         the ✕ (finding cards only) removes the card from
+                         THIS person's view - the find stays in the tray
+                         (unlike the tray's ✕, which deletes it). -->
                     <StackPanel x:Name="CardButtons" Orientation="Vertical"
                                 HorizontalAlignment="Right" VerticalAlignment="Top"
                                 Visibility="Collapsed"
                                 Background="{DynamicResource MahApps.Brushes.Accent4}">
                         <Button Width="16" Height="16" Padding="0"
                                 Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                                ToolTip="Zitat bearbeiten (Seite und Notiz)"
+                                ToolTip="Zitat bearbeiten — bei bestehenden Gramps-Zitaten wird die Fundstellen-Korrektur vorgemerkt"
                                 Command="{Binding DataContext.EditCitationCommand,
                                           RelativeSource={RelativeSource AncestorType=UserControl}}"
                                 CommandParameter="{Binding}">
@@ -355,11 +413,20 @@
                                     Foreground="{DynamicResource MahApps.Brushes.Gray2}" />
                         </Button>
                         <Button Width="16" Height="16" Padding="0"
-                                Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                                ToolTip="Aus dieser Ansicht entfernen — der Fund bleibt in der Ablage"
                                 Command="{Binding DataContext.UnadoptCommand,
                                           RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                CommandParameter="{Binding}">
+                                CommandParameter="{Binding}"
+                                ToolTip="Aus dieser Ansicht entfernen — der Fund bleibt in der Ablage">
+                            <Button.Style>
+                                <Style TargetType="Button"
+                                       BasedOn="{StaticResource MahApps.Styles.Button.Chromeless}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsFinding}" Value="False">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
                             <iconPacks:PackIconFontAwesome6 Kind="XmarkSolid"
                                     Width="11" Height="11" Foreground="Firebrick" />
                         </Button>
@@ -381,15 +448,11 @@
                     <Setter TargetName="Card" Property="ContextMenu"
                             Value="{StaticResource FindingCardMenu}" />
                 </DataTrigger>
-                <MultiDataTrigger>
-                    <MultiDataTrigger.Conditions>
-                        <Condition Binding="{Binding IsFinding}" Value="True" />
-                        <Condition Binding="{Binding IsMouseOver, ElementName=Card}"
-                                   Value="True" />
-                    </MultiDataTrigger.Conditions>
+                <DataTrigger Binding="{Binding IsMouseOver, ElementName=Card}"
+                             Value="True">
                     <Setter TargetName="CardButtons" Property="Visibility"
                             Value="Visible" />
-                </MultiDataTrigger>
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
                     <Setter TargetName="Card" Property="BorderBrush"
                             Value="{DynamicResource MahApps.Brushes.Accent}" />
@@ -424,6 +487,17 @@
              between further hits. -->
         <DockPanel Grid.Row="0" Width="500" HorizontalAlignment="Left"
                    Margin="0,0,0,6">
+            <!-- explicit reload of the centered person - to see edits
+                 made directly in Gramps (the upload reloads affected
+                 persons automatically before sending) -->
+            <Button DockPanel.Dock="Right" Width="26" Padding="0"
+                    Margin="6,0,0,0"
+                    Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
+                    Command="{Binding RefreshCommand}"
+                    ToolTip="Angezeigte Person neu aus Gramps laden (z. B. nach Änderungen direkt in Gramps — vorgemerkte Korrekturen bleiben erhalten und gelten gegen den neuen Stand)">
+                <iconPacks:PackIconFontAwesome6 Kind="ArrowsRotateSolid"
+                        Width="13" Height="13" />
+            </Button>
             <ComboBox DockPanel.Dock="Right" Width="240" Margin="8,0,0,0"
                       ItemsSource="{Binding SearchResults}"
                       SelectedItem="{Binding SelectedResult}"

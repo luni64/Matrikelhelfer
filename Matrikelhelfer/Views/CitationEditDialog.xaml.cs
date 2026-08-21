@@ -13,9 +13,23 @@ namespace Matrikelhelfer.Views;
 /// </summary>
 partial class CitationEditDialog : MetroWindow
 {
-    public CitationEditDialog(string context, string seite, string comment)
+    /// <summary>grampsCitation: true edits an EXISTING Gramps citation's
+    /// page/Fundstelle (staged correction) — the note and the copy
+    /// button are hidden then (notes are separate Gramps objects, and a
+    /// "copy" only makes sense for the app's own finds).</summary>
+    public CitationEditDialog(string context, string seite, string comment,
+                              bool grampsCitation = false)
     {
         InitializeComponent();
+        if (grampsCitation)
+        {
+            Title = "Gramps-Zitat korrigieren";
+            SeiteLabel.Content = "Fundstelle/Seite:";
+            SeiteBox.ToolTip = "Das Feld „Band/Seite“ des Gramps-Zitats.";
+            NoteLabel.Visibility = System.Windows.Visibility.Collapsed;
+            CommentBox.Visibility = System.Windows.Visibility.Collapsed;
+            CopyButton.Visibility = System.Windows.Visibility.Collapsed;
+        }
         ContextLine.Text = context;
         SeiteBox.Text = seite;
         CommentBox.Text = comment;

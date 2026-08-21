@@ -158,7 +158,12 @@
                                    Foreground="{DynamicResource MahApps.Brushes.Gray2}" />
                     </StackPanel>
                 </Button>
-                <TextBlock Text="{Binding StatusText}" Foreground="Firebrick"
+                <!-- NEUTRAL color: the bar mostly carries informational
+                     messages ("3 Änderungen offen", "Zitat aktualisiert");
+                     severe failures additionally raise an error DIALOG,
+                     so red-for-everything signalled nothing (2026-08). -->
+                <TextBlock Text="{Binding StatusText}"
+                           Foreground="{DynamicResource MahApps.Brushes.Gray2}"
                            TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">

@@ -37,7 +37,8 @@ from gramps.gen.const import USER_DATA, VERSION as GRAMPS_VERSION
 from gramps.gen.errors import HandleError
 
 from mhbridge_batch import do_capture_batch
-from mhbridge_capture import InvalidPayload, do_attach, do_capture
+from mhbridge_capture import (InvalidPayload, StaleObject, do_attach,
+                              do_capture)
 from mhbridge_events import event_type_catalog
 from mhbridge_persons import (DEFAULT_LIMIT, MAX_LIMIT, PersonIndex,
                               person_detail)
@@ -113,8 +114,13 @@ def run_in_main(func, timeout=MAIN_THREAD_TIMEOUT_S):
 class BridgeService:
     """Server lifecycle, token, discovery file, request bookkeeping."""
 
-    def __init__(self, dbstate, notify=None, discovery_file=None):
+    def __init__(self, dbstate, notify=None, discovery_file=None,
+                 uistate=None):
         self.dbstate = dbstate
+        # uistate (optional - absent in headless runs): lets the batch
+        # deal with OPEN GRAMPS EDITORS on objects it touches, see
+        # _close_touched_editors.
+        self.uistate = uistate
         self._listeners = [notify] if notify else []
         self.discovery_file = discovery_file or DISCOVERY_FILE
         self._server = None
@@ -234,11 +240,79 @@ class BridgeService:
                      request_id)
             return self._idempotency[request_id]
         db = self._open_db()
+        self._close_touched_editors(payload)
         response, created_count = do_capture_batch(db, payload)
         self.objects_created += created_count
         if request_id:
             self._idempotency[request_id] = response
         return response
+
+    def _close_touched_editors(self, payload):
+        """Deal with OPEN Gramps editor windows on objects this batch
+        touches. An editor holds an in-memory copy of its object: a
+        commit underneath leaves the window stale, and saving it later
+        would silently OVERWRITE the batch's changes with old data.
+        Rule: an editor without unsaved edits is closed silently
+        (_do_close skips the save prompt - nothing is lost); an editor
+        WITH unsaved edits aborts the batch with 409 EDITOR_OPEN - the
+        user's typed changes are never discarded, and the batch never
+        races them. Primary-object editors register in uistate.gwm
+        keyed by the object HANDLE (EditPrimary.build_window_key);
+        temp ids simply miss the lookup. Main thread only."""
+        uistate = self.uistate
+        if uistate is None or not hasattr(uistate, "gwm"):
+            return
+        handles = set()
+        for spec in ((payload.get("updates") or [])
+                     + (payload.get("deletes") or [])):
+            handles.add(spec.get("handle"))
+        for spec in payload.get("families") or []:
+            handles.add(spec.get("handle"))
+            handles.add(spec.get("father"))
+            handles.add(spec.get("mother"))
+            handles.update(spec.get("children") or [])
+        for spec in payload.get("events") or []:
+            handles.add(spec.get("person"))
+            handles.add(spec.get("family"))
+        for spec in payload.get("citations") or []:
+            for target in spec.get("targets") or []:
+                if isinstance(target, dict):
+                    handles.add(target.get("ref"))
+        for spec in payload.get("attach") or []:
+            handles.add(spec.get("citation"))
+            for target in spec.get("targets") or []:
+                if isinstance(target, dict):
+                    handles.add(target.get("ref"))
+        handles.discard(None)
+
+        blocked = []
+        for handle in handles:
+            item = uistate.gwm.get_item_from_id(handle)
+            if item is None:
+                continue
+            try:
+                dirty = item.data_has_changed()
+            except Exception:  # noqa: BLE001 - not a primary editor: leave it
+                continue
+            if dirty:
+                try:
+                    title = item.window.get_title() or str(handle)
+                except Exception:  # noqa: BLE001
+                    title = str(handle)
+                blocked.append(title)
+            else:
+                try:
+                    item._do_close()
+                    LOG.info("closed clean editor for %s", handle)
+                except Exception:  # noqa: BLE001 - closing is best-effort
+                    LOG.exception("could not close editor for %s", handle)
+        if blocked:
+            raise BridgeError(
+                409, "EDITOR_OPEN",
+                "In Gramps sind ungespeicherte Bearbeitungsfenster "
+                "geöffnet: " + "; ".join(sorted(blocked))
+                + " – bitte dort speichern oder verwerfen, dann erneut "
+                "senden.")
 
     def attach_citation(self, citation_handle, payload):
         request_id = payload.get("request_id")
@@ -516,6 +590,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
             self._respond_error(404, "NOT_FOUND", "Unknown endpoint: " + path)
         except InvalidPayload as err:
             self._respond_error(400, "INVALID_REQUEST", str(err))
+        except StaleObject as err:
+            self._respond_error(409, "CONFLICT", str(err))
         except HandleError:
             self._respond_error(404, "NOT_FOUND",
                                 "Referenced handle does not exist.")

@@ -73,6 +73,21 @@ sealed class PersonBoxVM(string id) : GrampsObservable
     bool _isCenter;
     public bool IsCenter { get => _isCenter; set => Set(ref _isCenter, value); }
 
+    /// <summary>True while an EditPerson correction is staged for this
+    /// (real) person — the box then shows the EFFECTIVE name in italics
+    /// so the display never drifts from what the upload will do.</summary>
+    bool _isPendingEdit;
+    public bool IsPendingEdit { get => _isPendingEdit; set => Set(ref _isPendingEdit, value); }
+
+    /// <summary>Overlays the staged correction's effective name (called
+    /// after UpdateFromNode, which resets the overlay).</summary>
+    public void ApplyStagedEdit(string effectiveName, string summary)
+    {
+        IsPendingEdit = true;
+        Name = ShortenName(effectiveName, IsLarge ? 22 : 18);
+        ToolTipText = ToolTipText + "\nKorrektur vorgemerkt: " + summary;
+    }
+
     string _toolTipText = "";
     public string ToolTipText { get => _toolTipText; set => Set(ref _toolTipText, value); }
 
@@ -206,6 +221,7 @@ sealed class PersonBoxVM(string id) : GrampsObservable
     /// node — the box only varies the life lines.</summary>
     public void UpdateFromNode(TreePerson node)
     {
+        IsPendingEdit = false;   // the caller re-applies any overlay
         string full = node.DisplayName is { Length: > 0 } name ? name : "(ohne Name)";
         Name = ShortenName(full, IsLarge ? 22 : 18);
         IsVirtual = node.IsVirtual;
@@ -259,6 +275,39 @@ sealed class FactRowVM(string id) : GrampsObservable
     bool _isPendingNew;
     public bool IsPendingNew { get => _isPendingNew; set => Set(ref _isPendingNew, value); }
 
+    /// <summary>True while a DeleteEvent change entry targets this
+    /// (existing) event — the row renders struck-through, and assigning
+    /// citations to it is blocked. Set by RefreshLinkView.</summary>
+    bool _isPendingDelete;
+    public bool IsPendingDelete { get => _isPendingDelete; set => Set(ref _isPendingDelete, value); }
+
+    /// <summary>True while an EditEvent change entry targets this row —
+    /// it then renders the EFFECTIVE (staged) values, not the Gramps
+    /// state, marked "(korrigiert)". Set by RefreshLinkView.</summary>
+    bool _isPendingEdit;
+    public bool IsPendingEdit { get => _isPendingEdit; set => Set(ref _isPendingEdit, value); }
+
+    /// <summary>Overlays the staged correction's effective values (the
+    /// entry stores them for ALL event fields, changed or not) so the
+    /// row previews what the upload will make of it.</summary>
+    public void ApplyStagedEdit(GrampsChangeEntry entry)
+    {
+        IsPendingEdit = true;
+        EventName = $"(korrigiert) {entry.EventTypeLabel}"
+            + (Scope == "family" ? "  [Familie]" : "");
+        string? shortPlace = entry.EventPlace is { Length: > 0 } place
+            ? place.Split(',')[0].Trim() : null;
+        DetailLine = string.Join(" ",
+            new[] { entry.EventDateText, shortPlace }
+                .Where(part => part is { Length: > 0 }));
+        Label = (EventName + " " + DetailLine).Trim();
+    }
+
+    /// <summary>The bridge DTO this row renders (real events only) —
+    /// the edit/delete staging needs its structured fields and change
+    /// time; null for pending "(neu)" rows.</summary>
+    public PersonEvent? Source { get; private set; }
+
     /// <summary>Citations already on this row in Gramps — the link view
     /// draws its solid lines and locked checkboxes from these.</summary>
     public List<CitationRef> Citations { get; private set; } = [];
@@ -291,7 +340,9 @@ sealed class FactRowVM(string id) : GrampsObservable
         FamilyHandle = evt.FamilyHandle;
         CitationCount = evt.CitationCount;
         Citations = evt.Citations ?? [];
+        Source = evt;
         IsPendingNew = false;
+        IsPendingEdit = false;   // RefreshLinkView re-applies any overlay
     }
 
     public void UpdateFromPending(GrampsChangeEntry entry)
@@ -339,6 +390,11 @@ sealed class SourceCardVM(string key) : GrampsObservable
     string _toolTipText = "";
     public string ToolTipText { get => _toolTipText; set => Set(ref _toolTipText, value); }
 
+    /// <summary>The bridge DTO behind an existing-citation card (null
+    /// for finding cards) — page-correction staging needs its change
+    /// time, opening the scan its Digitalisat url.</summary>
+    public CitationRef? Citation { get; set; }
+
     /// <summary>Fact rows already carrying this citation in Gramps
     /// (always empty for finding cards). Locked in assign mode — the
     /// bridge deliberately cannot detach citations (spec 2.2).</summary>
@@ -372,7 +428,13 @@ sealed record TreeFamilyChoice(TreeFamily Family, string Display);
 /// the API, Label to the user, Group to the view's grouping.</summary>
 sealed record EventTypeChoice(string Group, string Xml, string Label, bool IsFamily);
 
-enum GrampsChangeKind { AttachCitation, CreateEvent, AttachExisting, CreatePerson }
+enum GrampsChangeKind
+{
+    AttachCitation, CreateEvent, AttachExisting, CreatePerson,
+    // staged corrections of EXISTING Gramps objects (revised 2026-08:
+    // the additive-only rule softened for exactly these)
+    EditPerson, EditEvent, DeleteEvent, EditExistingCitation,
+}
 
 /// <summary>One entry of the change list ("Änderungsliste"): a recorded
 /// user action, executed by the batch upload. Citation-bearing entries
@@ -426,6 +488,16 @@ sealed class GrampsChangeEntry : GrampsObservable
     public string? NewGender { get; set; }
     public string? RoleLabel { get; init; }
 
+    // EditPerson / EditEvent / DeleteEvent: staged corrections of an
+    // EXISTING Gramps object (TargetHandle). UpdateSet is the SPARSE
+    // set block sent verbatim (only changed keys; null clears);
+    // ExpectChange is the object's change time as read (409 CONFLICT
+    // when it moved); EditSummary is the human-readable digest for the
+    // change list (a delete's summary warns about attached citations).
+    public Dictionary<string, object?>? UpdateSet { get; init; }
+    public long? ExpectChange { get; set; }   // re-armed on every fresh read
+    public string? EditSummary { get; init; }
+
     string? _error;
     public string? Error
     {
@@ -446,6 +518,15 @@ sealed class GrampsChangeEntry : GrampsObservable
             $"Vorhandenes Zitat „{SourceLabel}“ → {TargetLabel}",
         GrampsChangeKind.CreatePerson =>
             $"Neue Person: {NewGiven} {NewSurname} ({RoleLabel ?? "?"})",
+        GrampsChangeKind.EditPerson =>
+            $"Person korrigieren: {EditSummary}",
+        GrampsChangeKind.EditEvent =>
+            $"Ereignis ändern: {TargetLabel} — {EditSummary}",
+        GrampsChangeKind.DeleteEvent =>
+            $"Ereignis löschen: {TargetLabel}"
+            + (EditSummary is { Length: > 0 } ? $" — {EditSummary}" : ""),
+        GrampsChangeKind.EditExistingCitation =>
+            $"Zitat korrigieren: {TargetLabel} — {EditSummary}",
         _ => $"Zitat {FindLabel} → {TargetLabel}",
     };
 }

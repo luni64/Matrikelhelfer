@@ -266,6 +266,21 @@ Für Formatvorlagen stehen die beiden Links unter `{PageUrl}` und `{ImageUrl}` z
 
 ---
 
+<!-- TODO (vor dem nächsten Release): Kapitel "Gramps-Modus" schreiben —
+     der ganze Gramps-Reiter ist im Handbuch noch nicht dokumentiert
+     (Suche/Baum, Zuordnungsansicht, Änderungsliste als Dialog, Upload
+     als EINE Transaktion, vorgemerkte Korrekturen an bestehenden
+     Personen/Ereignissen/Zitaten). Dabei unbedingt aufnehmen:
+
+     Tipp "Digitalisat-Attribut": Der Scan-Link eines Zitats liegt als
+     Zitat-Attribut mit dem Typ "Digitalisat" (Wert = URL). Das schreibt
+     die App beim Upload selbst — man kann es aber auch VON HAND an
+     beliebige Gramps-Zitate anhängen (z. B. alte Ancestry-Importe):
+     "Im Browser öffnen" auf den Quellenkarten der App UND das
+     Digitalisate-Gramplet in Gramps greifen es gleichermaßen auf.
+     Schreibweise exakt "Digitalisat" (Groß-/Kleinschreibung zählt);
+     das ältere Attribut "MH_Permalink" wird weiterhin gelesen. -->
+
 ## Tipps für die Praxis
 
 - Tragen Sie die **Seite** direkt nach dem Lesen ein, solange Sie den Scan noch vor Augen haben – das rote Feld erinnert Sie daran.

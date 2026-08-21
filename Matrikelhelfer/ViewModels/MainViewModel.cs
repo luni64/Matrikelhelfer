@@ -483,7 +483,7 @@ class MainViewModel : INotifyPropertyChanged
         AdoptIntoGrampsCommand = new RelayCommand(AdoptSelectedIntoGramps,
             () => SelectedSavedEntry != null);
         Gramps = new GrampsViewModel(_gramps, SavedEntries, s => StatusText = s,
-                                     EditCitation)
+                                     EditCitation, NavigateTo)
         {
             CitationConfidence = _grampsConfidence,
         };
@@ -1000,7 +1000,16 @@ class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            // a failed library write is potential DATA LOSS (the finds
+            // exist only in memory now) - shout, don't whisper in the
+            // status bar (field feedback 2026-08)
             StatusText = $"Fehler beim Speichern der Einträge: {ex.Message}";
+            MessageBox.Show(
+                "Die Einträge konnten NICHT gespeichert werden – die Funde "
+                + "existieren nur noch im Arbeitsspeicher dieser Sitzung.\n\n"
+                + ex.Message,
+                "Speichern fehlgeschlagen", MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 

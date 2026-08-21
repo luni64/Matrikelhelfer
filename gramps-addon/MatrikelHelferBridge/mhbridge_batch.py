@@ -17,11 +17,11 @@ Main-thread only (callers go through mhbridge_service.run_in_main).
 import logging
 
 from gramps.gen.db import DbTxn
-from gramps.gen.lib import (ChildRef, Event, EventRef, EventRoleType,
-                            EventType, Family)
+from gramps.gen.lib import (ChildRef, Date, Event, EventRef, EventRoleType,
+                            EventType, Family, Surname)
 
-from mhbridge_capture import (InvalidPayload, _brief, _event_participants,
-                              _partners, _resolve_place,
+from mhbridge_capture import (InvalidPayload, StaleObject, _GENDERS, _brief,
+                              _event_participants, _partners, _resolve_place,
                               _resolve_repository, _resolve_source,
                               _set_type, _source_brief, apply_person_url,
                               build_citation, build_date,
@@ -37,13 +37,17 @@ def do_capture_batch(db, payload):
     events_spec = payload.get("events") or []
     citations_spec = payload.get("citations") or []
     attach_spec = payload.get("attach") or []
+    updates_spec = payload.get("updates") or []
+    deletes_spec = payload.get("deletes") or []
     if not (persons_spec or families_spec or events_spec
-            or citations_spec or attach_spec):
+            or citations_spec or attach_spec or updates_spec
+            or deletes_spec):
         raise InvalidPayload("empty batch")
 
-    label = ("MatrikelHelfer: Stapel (%d Personen, %d Ereignisse, %d Zitate)"
-             % (len(persons_spec), len(events_spec),
-                len(citations_spec)))[:100]
+    corrections = len(updates_spec) + len(deletes_spec)
+    label = ("MatrikelHelfer: Stapel (%d Personen, %d Ereignisse, %d Zitate%s)"
+             % (len(persons_spec), len(events_spec), len(citations_spec),
+                ", %d Korrekturen" % corrections if corrections else ""))[:100]
 
     tmp_persons = {}
     tmp_families = {}
@@ -55,6 +59,8 @@ def do_capture_batch(db, payload):
     created_events = {}
     citation_results = []
     attach_results = []
+    updated = []
+    deleted = []
 
     with DbTxn(label, db) as trans:
         def person_ref(ref, what):
@@ -77,6 +83,37 @@ def do_capture_batch(db, payload):
             if ref in tmp_events:
                 return tmp_events[ref]
             return db.get_event_from_handle(ref)
+
+        # -- 0) staleness guard, BEFORE this batch commits anything ---
+        # expect_change protects against edits made OUTSIDE this batch,
+        # so it must be evaluated up front: later steps legitimately
+        # commit the very objects an update targets (adding a parent
+        # commits the CHILD person; an event commits its owner), which
+        # bumps their change time inside the transaction and would trip
+        # a false CONFLICT if checked at apply time.
+        def check_change(obj, spec, what):
+            expect = spec.get("expect_change")
+            if expect is not None and obj.get_change_time() != expect:
+                raise StaleObject(
+                    "%s wurde inzwischen in Gramps geändert - bitte neu "
+                    "laden" % what)
+
+        for spec in updates_spec:
+            kind = spec.get("type")
+            if kind == "person":
+                check_change(db.get_person_from_handle(spec.get("handle")),
+                             spec, "Person")
+            elif kind == "event":
+                check_change(db.get_event_from_handle(spec.get("handle")),
+                             spec, "Ereignis")
+            elif kind == "citation":
+                check_change(db.get_citation_from_handle(spec.get("handle")),
+                             spec, "Zitat")
+            # unknown kinds are rejected in the update step below
+        for spec in deletes_spec:
+            if spec.get("type") == "event":
+                check_change(db.get_event_from_handle(spec.get("handle")),
+                             spec, "Ereignis")
 
         # -- 1) bare persons ------------------------------------------
         for spec in persons_spec:
@@ -282,6 +319,97 @@ def do_capture_batch(db, payload):
             attach_results.append({"citation": citation.get_handle(),
                                    "attached_to": attached})
 
+        # -- 6) updates: EXISTING persons (name/gender) and events ----
+        # Sparse semantics: only keys present in 'set' change (a null
+        # value clears the field); everything else - alternate names,
+        # suffixes, notes, media - stays untouched. The staleness guard
+        # already ran in step 0 (a mismatch aborts the whole batch with
+        # 409 CONFLICT, so a newer Gramps-side edit is never silently
+        # overwritten).
+        for spec in updates_spec:
+            kind = spec.get("type")
+            set_block = spec.get("set")
+            if not isinstance(set_block, dict) or not set_block:
+                raise InvalidPayload("update needs a non-empty 'set' block")
+            if kind == "person":
+                person = db.get_person_from_handle(spec.get("handle"))
+                name = person.get_primary_name()
+                if "given" in set_block:
+                    name.set_first_name(set_block["given"] or "")
+                if "surname" in set_block:
+                    surnames = name.get_surname_list()
+                    if surnames:
+                        # only the FIRST surname's value - prefixes,
+                        # patronymics and further surnames survive
+                        surnames[0].set_surname(set_block["surname"] or "")
+                        name.set_surname_list(surnames)
+                    else:
+                        surname = Surname()
+                        surname.set_surname(set_block["surname"] or "")
+                        name.add_surname(surname)
+                if "gender" in set_block:
+                    code = set_block["gender"] or "U"
+                    if code not in _GENDERS:
+                        raise InvalidPayload("gender must be M, F or U")
+                    person.set_gender(_GENDERS[code])
+                db.commit_person(person, trans)
+                updated.append({"type": "person",
+                                "handle": person.get_handle()})
+            elif kind == "event":
+                event = db.get_event_from_handle(spec.get("handle"))
+                if "type" in set_block:
+                    event.set_type(_set_type(EventType(),
+                                             set_block["type"]))
+                if "date" in set_block:
+                    date = build_date(set_block["date"])
+                    event.set_date_object(date if date is not None
+                                          else Date())
+                if "place" in set_block:
+                    place_spec = set_block["place"]
+                    event.set_place_handle(
+                        _resolve_place(db, place_spec, trans, counters)
+                        if place_spec else "")
+                if "description" in set_block:
+                    event.set_description(set_block["description"] or "")
+                db.commit_event(event, trans)
+                updated.append({"type": "event",
+                                "handle": event.get_handle()})
+            elif kind == "citation":
+                citation = db.get_citation_from_handle(spec.get("handle"))
+                if "page" in set_block:
+                    citation.set_page(set_block["page"] or "")
+                db.commit_citation(citation, trans)
+                updated.append({"type": "citation",
+                                "handle": citation.get_handle()})
+            else:
+                raise InvalidPayload(
+                    "update type must be person, event or citation")
+
+        # -- 7) deletes: EXISTING events only ------------------------
+        # remove_handle_references does the full internal cleanup
+        # (event_ref lists AND the birth/death indices pointing into
+        # them) - the same call Gramps' own delete uses. Persons,
+        # families, sources stay undeletable by design. Staleness was
+        # checked in step 0.
+        for spec in deletes_spec:
+            if spec.get("type") != "event":
+                raise InvalidPayload("only events can be deleted")
+            event = db.get_event_from_handle(spec.get("handle"))
+            handle_list = [event.get_handle()]
+            for class_name, ref_handle in list(
+                    db.find_backlink_handles(event.get_handle())):
+                if class_name == "Person":
+                    obj = db.get_person_from_handle(ref_handle)
+                    obj.remove_handle_references("Event", handle_list)
+                    db.commit_person(obj, trans)
+                elif class_name == "Family":
+                    obj = db.get_family_from_handle(ref_handle)
+                    obj.remove_handle_references("Event", handle_list)
+                    db.commit_family(obj, trans)
+            db.remove_event(event.get_handle(), trans)
+            deleted.append({"type": "event",
+                            "handle": spec.get("handle")})
+
     response = {
         "request_id": payload.get("request_id"),
         "created": {
@@ -291,6 +419,8 @@ def do_capture_batch(db, payload):
             "citations": citation_results,
             "attaches": attach_results,
         },
+        "updated": updated,
+        "deleted": deleted,
         "transaction_label": label,
     }
     LOG.info("capture-batch: %s (%d new objects)", label, counters["created"])

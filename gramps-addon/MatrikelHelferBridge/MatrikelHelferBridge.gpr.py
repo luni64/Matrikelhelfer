@@ -31,7 +31,7 @@ register(
     id="MHBridgeLinks",
     name="MatrikelHelfer Digitalisate",
     description=(
-        "Clickable links to the church-book scans (MH_Permalink) of the "
+        "Clickable links to the church-book scans (Digitalisat) of the "
         "active person's citations, grouped by event. The same scan "
         "appears under every event it backs."
     ),

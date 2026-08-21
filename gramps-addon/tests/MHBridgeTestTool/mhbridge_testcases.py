@@ -89,7 +89,7 @@ CAPTURE_TEMPLATE = {
         "page": "S. 42, Eintrag 7",
         "date": {"type": "regular", "year": 1810, "month": 3, "day": 12},
         "confidence": "normal",
-        "attributes": [{"key": "MH_Permalink",
+        "attributes": [{"key": "Digitalisat",
                         "value": "https://data.matricula-online.eu/de/x"}],
         "notes": [{"type": "Citation", "text": "Transkription: Anna ..."}],
     },
@@ -510,7 +510,7 @@ class BridgeApiTests(unittest.TestCase):
 
     def test_130_scan_links_listed_per_event(self):
         # Anna: seeded baptism (no citations) is skipped; the event from
-        # test_080 carries five MH_Permalink citations by now (080, two
+        # test_080 carries five permalink citations by now (080, two
         # from 121, one each from 112 and 122), and test_112 added a
         # Residence event with one more - all must be listed, same-URL
         # repeats included, because one record can back several
@@ -519,7 +519,7 @@ class BridgeApiTests(unittest.TestCase):
             db(), CTX["handles"]["anna"]))
         self.assertEqual(len(rows), 2)
         links = [link for row in rows for link in row["links"]]
-        # every citation carries the template's MH_Permalink (/de/x):
+        # every citation carries the template's Digitalisat link (/de/x):
         # the SAME url must be listed once per citation, not collapsed
         self.assertEqual([link["url"].endswith("/de/x") for link in links],
                          [True] * 6)
@@ -893,3 +893,117 @@ class BridgeApiTests(unittest.TestCase):
         self.assertEqual(h1, h2)                 # reused, not duplicated
         self.assertEqual(name, "Pollenfeld")
         self.assertEqual(places_after, before + 1)
+
+    # -- batch updates/deletes of EXISTING objects (revised 2026-08:
+    #    persons: name/gender, events: type/date/place/description,
+    #    event delete - all staged client-side, guarded by expect_change)
+
+    def test_185_batch_update_person_and_event(self):
+        """Sparse updates: rename an existing person, change an existing
+        event's description and fix a citation's page in one batch;
+        untouched fields (given name, event date) survive."""
+        status, before = get("/persons/%s" % CTX["handles"]["hans"])
+        self.assertEqual(status, 200)
+        event = before["events"][0]
+        citation = next(c for e in before["events"] for c in e["citations"])
+        status, body = post("/capture-batch", {
+            "request_id": "req-185",
+            "updates": [
+                {"type": "person", "handle": CTX["handles"]["hans"],
+                 "expect_change": before["change"],
+                 "set": {"surname": "Hubermann"}},
+                {"type": "event", "handle": event["handle"],
+                 "expect_change": event["change"],
+                 "set": {"description": "korrigiert"}},
+                {"type": "citation", "handle": citation["handle"],
+                 "expect_change": citation["change"],
+                 "set": {"page": "S. 999, korrigiert"}},
+            ],
+        })
+        self.assertEqual(status, 200, body)
+        self.assertEqual(len(body["updated"]), 3)
+        status, after = get("/persons/%s" % CTX["handles"]["hans"])
+        self.assertIn("Hubermann", after["primary_name"])
+        self.assertIn("Hans", after["primary_name"])   # given untouched
+        row = [e for e in after["events"]
+               if e["handle"] == event["handle"]][0]
+        self.assertEqual(row["description"], "korrigiert")
+        self.assertEqual(row["date_text"], event["date_text"])  # untouched
+        fixed = next(c for e in after["events"] for c in e["citations"]
+                     if c["handle"] == citation["handle"])
+        self.assertEqual(fixed["page"], "S. 999, korrigiert")
+
+    def test_186_batch_delete_event_cleans_refs(self):
+        """Deleting an event also removes its event_refs from the owner
+        (remove_handle_references - the cleanup Gramps' delete does)."""
+        status, body = post("/capture-batch", {
+            "request_id": "req-186a",
+            "events": [{"tmp": "evt:del1", "type": "Baptism",
+                        "person": CTX["handles"]["hans"],
+                        "date": {"type": "regular", "year": 1781}}],
+        })
+        self.assertEqual(status, 200, body)
+        doomed = body["created"]["events"]["evt:del1"]["handle"]
+        status, detail = get("/persons/%s" % CTX["handles"]["hans"])
+        row = [e for e in detail["events"] if e["handle"] == doomed][0]
+        status, body = post("/capture-batch", {
+            "request_id": "req-186b",
+            "deletes": [{"type": "event", "handle": doomed,
+                         "expect_change": row["change"]}],
+        })
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["deleted"],
+                         [{"type": "event", "handle": doomed}])
+
+        def check():
+            person = db().get_person_from_handle(CTX["handles"]["hans"])
+            refs = [r.ref for r in person.get_event_ref_list()]
+            try:
+                db().get_event_from_handle(doomed)
+                exists = True
+            except Exception:  # noqa: BLE001 - HandleError expected
+                exists = False
+            return doomed in refs, exists
+        in_refs, exists = in_main(check)
+        self.assertFalse(in_refs)
+        self.assertFalse(exists)
+
+    def test_186b_update_combined_with_family_change(self):
+        """Regression (field find 2026-08): ONE batch that creates a
+        parent for a person AND corrects that person. The family step
+        commits the child inside the transaction, bumping its change
+        time - the staleness guard must be evaluated BEFORE the batch's
+        own commits, or this false-CONFLICTs."""
+        status, before = get("/persons/%s" % CTX["handles"]["anna"])
+        self.assertEqual(status, 200)
+        # note: "req-186a"/"req-186b" are taken by the delete test - a
+        # reused id would return ITS cached response (idempotency)
+        status, body = post("/capture-batch", {
+            "request_id": "req-186-regression",
+            "persons": [{"tmp": "new:papa", "given": "Xaver",
+                         "surname": "Meier", "gender": "M"}],
+            "families": [{"tmp": "new:f186b", "father": "new:papa",
+                          "children": [CTX["handles"]["anna"]]}],
+            "updates": [{"type": "person",
+                         "handle": CTX["handles"]["anna"],
+                         "expect_change": before["change"],
+                         "set": {"given": "Anna Barbara"}}],
+        })
+        self.assertEqual(status, 200, body)
+        status, after = get("/persons/%s" % CTX["handles"]["anna"])
+        self.assertIn("Anna Barbara", after["primary_name"])
+
+    def test_187_stale_update_conflicts(self):
+        """A wrong expect_change aborts with 409 CONFLICT and writes
+        nothing - a newer Gramps-side edit is never overwritten."""
+        status, body = post("/capture-batch", {
+            "request_id": "req-187",
+            "updates": [{"type": "person",
+                         "handle": CTX["handles"]["hans"],
+                         "expect_change": 12345,
+                         "set": {"surname": "Nie"}}],
+        })
+        self.assertEqual(status, 409)
+        self.assertEqual(body["error"]["code"], "CONFLICT")
+        status, after = get("/persons/%s" % CTX["handles"]["hans"])
+        self.assertNotIn("Nie", after["primary_name"])

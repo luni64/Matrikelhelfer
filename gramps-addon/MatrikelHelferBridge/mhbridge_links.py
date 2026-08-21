@@ -26,7 +26,11 @@ from gramps.gen.plug import Gramplet
 
 LOG = logging.getLogger("MatrikelHelferBridge")
 
-PERMALINK_ATTRIBUTE = "MH_Permalink"
+# The citation attribute carrying the scan link. Renamed 2026-08 to the
+# neutral "Digitalisat" (matching the Internet-tab URL type) - "MH_" says
+# nothing to a Gramps user years later. The old key is STILL READ:
+# citations captured before the rename carry it.
+PERMALINK_ATTRIBUTES = ("Digitalisat", "MH_Permalink")
 
 
 def _links_of(db, citation_handles):
@@ -38,7 +42,7 @@ def _links_of(db, citation_handles):
             continue
         url = None
         for attribute in citation.get_attribute_list():
-            if str(attribute.get_type()) == PERMALINK_ATTRIBUTE:
+            if str(attribute.get_type()) in PERMALINK_ATTRIBUTES:
                 url = attribute.get_value()
                 break
         if url:

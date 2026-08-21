@@ -61,7 +61,7 @@ Zwei getrennte Prozesse, gekoppelt über ein lokales HTTP/JSON-Protokoll. Keine 
 ### 2.2 Out of Scope (spätere Ausbaustufen)
 
 - Medienobjekte (Bildausschnitte der Digitalisate) — vorgesehen für v2
-- Bearbeiten oder Löschen bestehender Objekte über die Bridge
+- ~~Bearbeiten oder Löschen bestehender Objekte über die Bridge~~ — **Revidiert 2026-08 (Feldtest):** Das ursprüngliche „nur ergänzen“-Prinzip wurde bewusst und ENG aufgeweicht, weil Korrekturen (Transkriptionsfehler, importierte Dubletten) genau WÄHREND der Kirchenbucharbeit auffallen. `POST /capture-batch` kann jetzt zusätzlich: bestehende **Personen** korrigieren (Vorname/erster Nachname/Geschlecht der Primärnamen — sparsam: nur übergebene Schlüssel, alles andere bleibt unberührt), bestehende **Ereignisse** korrigieren (Typ/Datum/Ort/Beschreibung) und **löschen** (mit vollständiger Rückverweis-Bereinigung wie Gramps’ eigenes Löschen), bestehende **Zitate** korrigieren (Fundstelle/Seite). Schutzmechanismen: `expect_change` (Änderungszeit beim Lesen; Abweichung → 409 CONFLICT, geprüft VOR den eigenen Commits des Stapels) und die Behandlung offener Gramps-Editoren (saubere Editoren werden geschlossen, ungespeicherte brechen mit 409 EDITOR_OPEN ab). Personen/Familien/Quellen bleiben **unlöschbar**; Bearbeitung von Quellen/Orten weiterhin out of scope.
 - Ancestry-/RootsMagic-Publikationspipeline (eigenes Vorhaben)
 - Ortsbereinigung / GOV-Hierarchie-Normalisierung (eigenes Vorhaben)
 - Nicht-lokale Nutzung (Netzwerkzugriff von anderen Rechnern)
@@ -305,7 +305,7 @@ Führt die gesamte Erfassung **in einer einzigen Gramps-Transaktion** aus. Das i
     "date": { "type": "regular", "year": 1780, "month": 3, "day": 12, "calendar": "gregorian" },
     "confidence": "normal",
     "attributes": [
-      { "key": "MH_Permalink", "value": "https://data.matricula-online.eu/de/..." },
+      { "key": "Digitalisat", "value": "https://data.matricula-online.eu/de/..." },
       { "key": "MH_CapturedAt", "value": "2026-08-16T10:24:00Z" }
     ],
     "notes": [
@@ -337,7 +337,7 @@ Führt die gesamte Erfassung **in einer einzigen Gramps-Transaktion** aus. Das i
 4. Zitat anlegen und mit der Quelle verknüpfen.
 5. Sind `targets` angegeben → Zitat an alle genannten Objekte anhängen.
 6. Ist `create_event_if_missing` gesetzt → Ereignis anlegen, dem Träger zuordnen, Zitat daran hängen. **Kombinierbar mit `targets`** (dasselbe Zitat hängt dann an bestehenden Objekten *und* am neuen Ereignis — ein Kirchenbucheintrag belegt oft mehrere Fakten gleichzeitig, vgl. §7.3). Träger ist **genau eines** von `person_handle` (Personenereignis, Rollen-Vorgabe `Primary`) oder `family_handle` (Familienereignis wie Trauung, Rollen-Vorgabe `Family`) — Trauungen gehören in Gramps an die Familie, nicht an die Person (Sandbox-Erkenntnis 2026-08-17).
-7. Optionaler Block `person_url` (`{path, description, type}`, Typ-Vorgabe `Digitalisat`): Der Permalink wird zusätzlich als klickbarer Eintrag in den **Internet-Reiter der beteiligten Personen** kopiert — nur Person und Repository haben in Gramps eine klickbare URL-Liste; das Zitat-Attribut `MH_Permalink` ist es nicht (Sandbox-Erkenntnis 2026-08-17). Beteiligte Personen: Ziel-Personen direkt, bei Ziel-Familien und Familienereignissen beide Partner, bei Ziel-Ereignissen die per Rückverweis ermittelten Träger. Dedupliziert über den Pfad — derselbe Link wird nie doppelt angelegt; alles in derselben Transaktion.
+7. Optionaler Block `person_url` (`{path, description, type}`, Typ-Vorgabe `Digitalisat`): Der Permalink wird zusätzlich als klickbarer Eintrag in den **Internet-Reiter der beteiligten Personen** kopiert — nur Person und Repository haben in Gramps eine klickbare URL-Liste; das Zitat-Attribut `Digitalisat` (bis 2026-08 `MH_Permalink` — wird weiterhin gelesen; `MH_SourceKey` behält seinen Namen bewusst, es ist der maschinelle Wiedererkennungs-Schlüssel) ist es nicht (Sandbox-Erkenntnis 2026-08-17). Beteiligte Personen: Ziel-Personen direkt, bei Ziel-Familien und Familienereignissen beide Partner, bei Ziel-Ereignissen die per Rückverweis ermittelten Träger. Dedupliziert über den Pfad — derselbe Link wird nie doppelt angelegt; alles in derselben Transaktion.
 7. Alles innerhalb **einer** `DbTxn` mit sprechendem Namen, z. B. `"MatrikelHelfer: Zitat Pollenfeld Bd. 3 S. 142"`. Bei einem Fehler in Schritt 2–6 wird die gesamte Transaktion verworfen.
 
 **Antwort:**

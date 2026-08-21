@@ -222,6 +222,14 @@ def _citation_rows(db, citation_handles, source_cache):
             except HandleError:
                 source_cache[source_handle] = (None, None)
         title, abbrev = source_cache[source_handle]
+        # the scan permalink the app stored at capture time ("Digitalisat"
+        # attribute; the pre-rename "MH_Permalink" is still read) - lets
+        # the client reopen the scan from a citation card
+        url = None
+        for attribute in citation.get_attribute_list():
+            if str(attribute.get_type()) in ("Digitalisat", "MH_Permalink"):
+                url = attribute.get_value() or None
+                break
         rows.append({
             "handle": citation_handle,
             "source_handle": source_handle,
@@ -229,6 +237,9 @@ def _citation_rows(db, citation_handles, source_cache):
             "source_abbrev": abbrev,
             "page": citation.get_page() or None,
             "date_text": get_date(citation) or None,
+            # staleness guard for batch updates (expect_change)
+            "change": citation.get_change_time(),
+            "url": url,
         })
     return rows
 
@@ -263,6 +274,8 @@ def person_detail(db, handle):
         return {
             "handle": event.get_handle(),
             "gramps_id": event.get_gramps_id(),
+            # staleness guard for batch updates/deletes (expect_change)
+            "change": event.get_change_time(),
             "type": str(event.get_type()),
             "role": str(event_ref.get_role()),
             "scope": scope,                     # person | family
@@ -335,6 +348,8 @@ def person_detail(db, handle):
         "gramps_id": person.get_gramps_id(),
         "primary_name": name_displayer.display(person),
         "gender": _gender_code(person.get_gender()),
+        # staleness guard for batch updates (expect_change)
+        "change": person.get_change_time(),
         "birth": _event_summary(db, get_birth_or_fallback(db, person)),
         "death": _event_summary(db, get_death_or_fallback(db, person)),
         "citation_count": len(person.get_citation_list()),
