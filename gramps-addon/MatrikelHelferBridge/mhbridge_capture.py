@@ -22,9 +22,10 @@ from gramps.gen.db import DbTxn
 from gramps.gen.display.name import displayer as name_displayer
 from gramps.gen.lib import (ChildRef, Citation, Date, Event, EventRef,
                             EventRoleType, EventType, Family, Name, Note,
-                            NoteType, Person, RepoRef, Repository,
-                            RepositoryType, Source, SourceMediaType,
-                            SrcAttribute, Surname, Url, UrlType)
+                            NoteType, Person, Place, PlaceName, RepoRef,
+                            Repository, RepositoryType, Source,
+                            SourceMediaType, SrcAttribute, Surname, Url,
+                            UrlType)
 
 LOG = logging.getLogger("MatrikelHelferBridge")
 
@@ -169,6 +170,33 @@ def _commit_target(db, target_type, obj, trans):
 
 
 # -- match-or-create -------------------------------------------------
+
+def _resolve_place(db, spec, trans, counters):
+    """Event place by NAME: reuse an existing place whose name (or
+    legacy title) matches casefolded, else create a bare top-level
+    place with that name in the same transaction. Deliberately simple
+    - no hierarchy, no place type: church-book work cycles through a
+    handful of parish/village names, and an existing curated place
+    must win over a duplicate. Returns the place handle."""
+    if not isinstance(spec, dict) or not (spec.get("title") or "").strip():
+        raise InvalidPayload("event place needs a 'title'")
+    wanted = spec["title"].strip()
+    wanted_cf = wanted.casefold()
+    for place in db.iter_places():
+        name = place.get_name()
+        value = name.get_value() if name else ""
+        if (value.casefold() == wanted_cf
+                or (place.get_title() or "").casefold() == wanted_cf):
+            return place.get_handle()
+    place = Place()
+    place_name = PlaceName()
+    place_name.set_value(wanted)
+    place.set_name(place_name)
+    place.set_title(wanted)
+    db.add_place(place, trans)
+    counters["created"] += 1
+    return place.get_handle()
+
 
 def _resolve_repository(db, block, trans, counters):
     if not block:
@@ -611,9 +639,12 @@ def do_capture(db, payload):
             if event_date is not None:
                 event.set_date_object(event_date)
             if event_spec.get("place_handle"):
-                # validate only - places are referenced, never created
+                # validate only - a handle references, never creates
                 db.get_place_from_handle(event_spec["place_handle"])
                 event.set_place_handle(event_spec["place_handle"])
+            elif event_spec.get("place"):
+                event.set_place_handle(_resolve_place(
+                    db, event_spec["place"], trans, counters))
             if event_spec.get("description"):
                 event.set_description(event_spec["description"])
             if citation is not None:

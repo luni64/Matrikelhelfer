@@ -45,7 +45,7 @@ partial class EventTypeDialog : MetroWindow
 
     public EventTypeDialog(IEnumerable<EventTypeChoice> choices,
                            EventTypeChoice? preselect, string dateText,
-                           string description = "",
+                           string description = "", string place = "",
                            string dateType = "regular", bool edit = false)
     {
         InitializeComponent();
@@ -68,12 +68,15 @@ partial class EventTypeDialog : MetroWindow
                                             m => m.Type == dateType);
         DateModifierBox.SelectedIndex = Math.Max(0, modifierIndex);
         DateBox.Text = dateText;
+        PlaceBox.Text = place;
         DescriptionBox.Text = description;
     }
 
     public EventTypeChoice? SelectedType => TypeList.SelectedItem as EventTypeChoice;
 
     public string Description => DescriptionBox.Text;
+
+    public string Place => PlaceBox.Text.Trim();
 
     public string DateText => DateBox.Text.Trim();
 

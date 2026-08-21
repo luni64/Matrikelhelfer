@@ -346,7 +346,7 @@
                                 Background="{DynamicResource MahApps.Brushes.Accent4}">
                         <Button Width="16" Height="16" Padding="0"
                                 Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                                ToolTip="Zitat bearbeiten (Seite und Kommentar)"
+                                ToolTip="Zitat bearbeiten (Seite und Notiz)"
                                 Command="{Binding DataContext.EditCitationCommand,
                                           RelativeSource={RelativeSource AncestorType=UserControl}}"
                                 CommandParameter="{Binding}">
@@ -406,15 +406,15 @@
 
     <Grid Margin="0,8,0,0">
         <!-- Single column (discussion 2026-08-20): tree at its natural
-             box height, the remaining vertical space split 75% link view
-             (facts|sources) / 25% change list - the side column disturbed
-             the view. -->
+             box height, the link view (facts|sources) takes ALL the
+             remaining vertical space - the change list moved into its
+             own dialog (2026-08), the tab keeps only a summary row. -->
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="3*" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- search: name + rough birth year, e.g. "Meier 1780". Fixed
@@ -632,75 +632,26 @@
                     IsHitTestVisible="False" ClipToBounds="True" />
         </Grid>
 
-        <!-- change list, 25% of the remaining height, same fixed width
-             as everything above; the upload button sits in its header
-             so no extra row is spent -->
+        <!-- change-list summary row: count + details left, upload right.
+             The list itself lives in ChangeListDialog (full space there);
+             this row is all the tab spends on it. -->
         <Border Grid.Row="4" Width="500" HorizontalAlignment="Left"
                 Margin="0,8,0,0"
                 Background="{DynamicResource MahApps.Brushes.Gray9}"
-                CornerRadius="6" Padding="10">
+                CornerRadius="6" Padding="10,6">
             <DockPanel>
-                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                    <Button DockPanel.Dock="Right" Content="An Gramps senden"
-                            FontWeight="SemiBold" Padding="10,2"
-                            Command="{Binding SendCommand}"
-                            ToolTip="Alle Änderungen in EINER Gramps-Transaktion ausführen (ein Undo in Gramps macht alles rückgängig)" />
-                    <TextBlock Text="Änderungsliste" FontWeight="SemiBold"
+                <Button DockPanel.Dock="Right" Content="An Gramps senden"
+                        FontWeight="SemiBold" Padding="10,2"
+                        Command="{Binding SendCommand}"
+                        ToolTip="Alle Änderungen in EINER Gramps-Transaktion ausführen (ein Undo in Gramps macht alles rückgängig)" />
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding ChangesSummary}" FontWeight="SemiBold"
                                VerticalAlignment="Center"
                                Foreground="{DynamicResource MahApps.Brushes.Accent}" />
-                </DockPanel>
-                <TreeView ItemsSource="{Binding ChangeTree}" BorderThickness="0"
-                          Background="Transparent">
-                    <TreeView.ItemContainerStyle>
-                        <Style TargetType="TreeViewItem"
-                               BasedOn="{StaticResource MahApps.Styles.TreeViewItem}">
-                            <Setter Property="IsExpanded" Value="True" />
-                        </Style>
-                    </TreeView.ItemContainerStyle>
-                    <TreeView.Resources>
-                        <HierarchicalDataTemplate DataType="{x:Type vm:GrampsChangeGroupVM}"
-                                                  ItemsSource="{Binding Children}">
-                            <DockPanel Margin="0,1">
-                                <Button DockPanel.Dock="Right" Padding="3,0"
-                                        Margin="6,0,0,0"
-                                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                                        ToolTip="Alle Änderungen zu dieser Person/Familie entfernen"
-                                        Command="{Binding DataContext.DeleteGroupCommand,
-                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding}">
-                                    <iconPacks:PackIconFontAwesome6 Kind="TrashCanSolid"
-                                            Width="11" Height="11" Foreground="Firebrick" />
-                                </Button>
-                                <TextBlock Text="{Binding EntityLabel}" FontWeight="Bold"
-                                           VerticalAlignment="Center"
-                                           TextTrimming="CharacterEllipsis" />
-                            </DockPanel>
-                        </HierarchicalDataTemplate>
-                        <HierarchicalDataTemplate DataType="{x:Type vm:GrampsChangeNodeVM}"
-                                                  ItemsSource="{Binding Children}">
-                            <DockPanel Margin="0,1">
-                                <Button DockPanel.Dock="Right" Padding="3,0"
-                                        Margin="6,0,0,0"
-                                        Style="{DynamicResource MahApps.Styles.Button.Chromeless}"
-                                        ToolTip="Diese Änderung entfernen (abhängige werden mit entfernt)"
-                                        Command="{Binding DataContext.DeleteEntryCommand,
-                                                  RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding Entry}">
-                                    <iconPacks:PackIconFontAwesome6 Kind="TrashCanSolid"
-                                            Width="10" Height="10" Foreground="Firebrick" />
-                                </Button>
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Entry.DisplayText}"
-                                               TextWrapping="Wrap" FontSize="12" />
-                                    <TextBlock Text="{Binding Entry.Error}" Foreground="Firebrick"
-                                               FontSize="11" TextWrapping="Wrap"
-                                               Visibility="{Binding Entry.HasError,
-                                                            Converter={StaticResource BoolToVisibility}}" />
-                                </StackPanel>
-                            </DockPanel>
-                        </HierarchicalDataTemplate>
-                    </TreeView.Resources>
-                </TreeView>
+                    <Button Content="Details…" Padding="8,1" Margin="10,0,0,0"
+                            Command="{Binding ShowChangesCommand}"
+                            ToolTip="Änderungsliste in einem eigenen Fenster anzeigen — dort lassen sich einzelne Änderungen auch entfernen" />
+                </StackPanel>
             </DockPanel>
         </Border>
     </Grid>

@@ -120,14 +120,11 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
-            <!-- MinWidth keeps the fields usable when the splitter is
-                 dragged far to the left. -->
-            <ColumnDefinition x:Name="ContentColumn" Width="*" MinWidth="420" />
-            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition x:Name="ContentColumn" Width="*" />
             <ColumnDefinition x:Name="EntriesColumn" Width="0" />
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Row="1" Grid.ColumnSpan="3"
+        <Border Grid.Row="1" Grid.ColumnSpan="2"
                 Background="{DynamicResource MahApps.Brushes.Gray10}"
                 BorderBrush="{DynamicResource MahApps.Brushes.Gray8}"
                 BorderThickness="0,1,0,0" Padding="15,4">
@@ -177,17 +174,6 @@
             </DockPanel>
         </Border>
 
-        <!-- Transparent (but still hit-testable) drag handle between fields
-             and panel; only visible while the panel is open. Stretches
-             across the WHOLE gap (the fields grid drops its right margin, so
-             this column is the entire space between the two panels) - the
-             draggable region is the full gap, not an 8px sliver offset to
-             one side. -->
-        <GridSplitter x:Name="EntriesSplitter" Grid.Column="1" Width="24" Margin="0,15"
-                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                      Background="Transparent" Visibility="Collapsed"
-                      DragCompleted="EntriesSplitter_DragCompleted" />
-
         <!-- Saved finds - a flat, sortable DataGrid for now (the
              Land/Bistum/Pfarrei/Buch tree comes later). Single click
              redisplays an entry in the main fields, double-click
@@ -195,7 +181,7 @@
              menu deletes. Default sort: newest first. Gray10 is MahApps'
              subtlest neutral surface brush - theme-managed, so the "card"
              tint survives light/dark/accent changes. -->
-        <Grid x:Name="EntriesPanel" Grid.Column="2" Margin="0,15,15,15" Visibility="Collapsed">
+        <Grid x:Name="EntriesPanel" Grid.Column="1" Margin="0,15,15,15" Visibility="Collapsed">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -359,7 +345,7 @@
                                 <Button CommandParameter="{Binding}"
                                         Command="{Binding DataContext.EditCitationCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                         Width="20" Height="20" Padding="0"
-                                        ToolTip="Zitat bearbeiten (Seite und Kommentar)">
+                                        ToolTip="Zitat bearbeiten (Seite und Notiz)">
                                     <Button.Style>
                                         <Style TargetType="Button" BasedOn="{StaticResource MahApps.Styles.Button.Chromeless}">
                                             <Setter Property="Visibility" Value="Hidden" />
@@ -414,10 +400,8 @@
             </Border>
         </Grid>
 
-        <!-- Symmetric 15 margin while the panel is CLOSED. When it opens,
-             the code-behind (UpdateEntriesPanel) drops the right margin to
-             0 so the splitter column owns the whole gap to the right panel
-             (see EntriesSplitter); it's restored on close. -->
+        <!-- Symmetric 15 margin; while the panel is open its right half
+             doubles as the gap to the tray (the tray has no left margin). -->
         <Grid x:Name="ContentGrid" Grid.Column="0" Margin="15" >
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -504,11 +488,11 @@
             </ScrollViewer.Style>
         <StackPanel>
             <!-- The find's annotation, saved together with the entry so
-                 interesting finds can be revisited later: free-text notes
-                 (Kommentar), cleared on every read. The former Name field
-                 was removed (2026-08) - it never reached Gramps; whose
-                 record it is belongs in the comment, which becomes the
-                 citation note. -->
+                 interesting finds can be revisited later: the free-text
+                 Notiz (named after the Gramps field it becomes - the note
+                 on the uploaded citation), cleared on every read. The
+                 former Name field was removed (2026-08) - it never reached
+                 Gramps; whose record it is belongs in the note. -->
             <Border Style="{StaticResource SectionCardStyle}">
                 <StackPanel>
                     <TextBlock Text="Notizen" Style="{StaticResource SectionHeadingStyle}" />
@@ -523,7 +507,8 @@
                         <TextBox Grid.Column="1" Padding="6,5" Height="60"
                                  AcceptsReturn="True" TextWrapping="Wrap"
                                  VerticalScrollBarVisibility="Auto"
-                                 mah:TextBoxHelper.Watermark="Kommentar"
+                                 mah:TextBoxHelper.Watermark="Notiz"
+                                 ToolTip="Wird beim Gramps-Upload zur Notiz am Zitat (Gramps-Feld „Notiz“); die erste Zeile ist die Überschrift der Ablage-Karte."
                                  mah:TextBoxHelper.UseFloatingWatermark="True"
                                  Text="{Binding CommentText, UpdateSourceTrigger=PropertyChanged}" />
                     </Grid>

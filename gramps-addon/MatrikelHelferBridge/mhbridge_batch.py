@@ -21,9 +21,10 @@ from gramps.gen.lib import (ChildRef, Event, EventRef, EventRoleType,
                             EventType, Family)
 
 from mhbridge_capture import (InvalidPayload, _brief, _event_participants,
-                              _partners, _resolve_repository,
-                              _resolve_source, _set_type, _source_brief,
-                              apply_person_url, build_citation, build_date,
+                              _partners, _resolve_place,
+                              _resolve_repository, _resolve_source,
+                              _set_type, _source_brief, apply_person_url,
+                              build_citation, build_date,
                               build_person_object)
 
 LOG = logging.getLogger("MatrikelHelferBridge")
@@ -152,6 +153,10 @@ def do_capture_batch(db, payload):
             date = build_date(spec.get("date"))
             if date is not None:
                 event.set_date_object(date)
+            if spec.get("place"):
+                # by name: reuse an existing place, else create one
+                event.set_place_handle(_resolve_place(
+                    db, spec["place"], trans, counters))
             if spec.get("description"):
                 event.set_description(spec["description"])
             db.add_event(event, trans)

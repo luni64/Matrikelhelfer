@@ -299,7 +299,9 @@ sealed class FactRowVM(string id) : GrampsObservable
         bool isFamily = entry.OwnerKind is "family" or "pending-family";
         EventName = $"(neu) {entry.EventTypeLabel ?? entry.EventType}"
             + (isFamily ? "  [Familie]" : "");
-        DetailLine = entry.EventDateText ?? "";
+        DetailLine = string.Join(" ",
+            new[] { entry.EventDateText, entry.EventPlace }
+                .Where(part => part is { Length: > 0 }));
         Label = (EventName + " " + DetailLine).Trim();
         Scope = isFamily ? "family" : "person";
         FamilyHandle = isFamily ? entry.OwnerHandle : null;
@@ -412,6 +414,7 @@ sealed class GrampsChangeEntry : GrampsObservable
     public string? EventTypeLabel { get; set; }
     public DateSpec? EventDate { get; set; }
     public string? EventDateText { get; set; }
+    public string? EventPlace { get; set; }              // by name, resolved at upload
     public string? OwnerKind { get; set; }
     public string? OwnerHandle { get; set; }
     public string? EventDescription { get; set; }
@@ -437,6 +440,7 @@ sealed class GrampsChangeEntry : GrampsObservable
         GrampsChangeKind.CreateEvent =>
             $"Neues Ereignis: {EventTypeLabel ?? EventType}"
             + (EventDateText is { Length: > 0 } ? " " + EventDateText : "")
+            + (EventPlace is { Length: > 0 } ? " in " + EventPlace : "")
             + (FindingId is null ? " (ohne Zitat)" : $" — mit Zitat {FindLabel}"),
         GrampsChangeKind.AttachExisting =>
             $"Vorhandenes Zitat „{SourceLabel}“ → {TargetLabel}",

@@ -17,9 +17,14 @@
                 <TextBox x:Name="DateBox" VerticalContentAlignment="Center"
                          ToolTip="jjjj, jjjj-mm oder jjjj-mm-tt — leer = ohne Datum. Bei Erwähnungen (»Mutter bereits verstorben«) eigenes Datum eintragen, z. B. »vor 1757«." />
             </DockPanel>
+            <Label Content="Ort (optional):" Padding="0,0,0,2" />
+            <TextBox x:Name="PlaceBox" VerticalContentAlignment="Center"
+                     Margin="0,0,0,6"
+                     ToolTip="Ort des Ereignisses. Beim Upload wird ein vorhandener Gramps-Ort mit diesem Namen wiederverwendet, sonst neu angelegt." />
             <Label Content="Beschreibung (optional):" Padding="0,0,0,2" />
             <TextBox x:Name="DescriptionBox" VerticalContentAlignment="Center"
-                     Margin="0,0,0,8" />
+                     Margin="0,0,0,8"
+                     ToolTip="Entspricht dem Feld „Beschreibung“ des Gramps-Ereignisses: eine einzeilige Kurzbeschreibung, KEINE Notiz. Die Notiz am Zitat kommt aus dem Notiz-Feld des Funds." />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="SaveButton" Content="Vormerken" IsDefault="True"
                         IsEnabled="False" Padding="14,4" Margin="0,0,8,0"

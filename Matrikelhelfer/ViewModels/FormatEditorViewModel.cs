@@ -144,6 +144,26 @@ class FormatEditorViewModel : INotifyPropertyChanged
     public IReadOnlyList<CitationTemplateEngine.DateStyle> DateStyles { get; } =
         CitationTemplateEngine.DateStyles;
 
+    /// <summary>One Gramps confidence level (bridge id + the label Gramps'
+    /// own citation editor uses).</summary>
+    public sealed record ConfidenceChoice(string Id, string Label);
+
+    public IReadOnlyList<ConfidenceChoice> ConfidenceChoices { get; } =
+    [
+        new("very_low", "Sehr niedrig"),
+        new("low", "Niedrig"),
+        new("normal", "Normal"),
+        new("high", "Hoch"),
+        new("very_high", "Sehr hoch"),
+    ];
+
+    ConfidenceChoice _selectedConfidence;
+    public ConfidenceChoice SelectedConfidence
+    {
+        get => _selectedConfidence;
+        set => SetField(ref _selectedConfidence, value);
+    }
+
     string _previewText = "";
     public string PreviewText
     {
@@ -167,6 +187,9 @@ class FormatEditorViewModel : INotifyPropertyChanged
 
         Targets = new[] { sources, citations };
         _selectedTarget = sources;
+        _selectedConfidence = ConfidenceChoices
+            .FirstOrDefault(c => c.Id == settings.GrampsConfidence)
+            ?? ConfidenceChoices[2];
         foreach (var target in Targets)
         {
             target.PropertyChanged += OnTargetChanged;
@@ -247,6 +270,7 @@ class FormatEditorViewModel : INotifyPropertyChanged
         SelectedSource = ToStyle(Targets[0].Selected ?? Targets[0].Formats[0]),
         CitationFormats = Targets[1].Formats.Select(ToStyle).ToList(),
         SelectedCitation = ToStyle(Targets[1].Selected ?? Targets[1].Formats[0]),
+        GrampsConfidence = SelectedConfidence.Id,
     };
 
     static CitationStyle ToStyle(FormatItem item) => new(item.Name, item.Template, item.DateStyle.Id);

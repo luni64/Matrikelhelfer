@@ -14,11 +14,11 @@
         <TextBox x:Name="SeiteBox" VerticalContentAlignment="Center"
                  Margin="0,0,0,6"
                  ToolTip="Die echte handschriftliche Seitennummer — sie kann nicht ausgelesen werden. Leer = Seite unbekannt." />
-        <Label Content="Kommentar (geht als Notiz zum Zitat nach Gramps):"
-               Padding="0,0,0,2" />
+        <Label Content="Notiz:" Padding="0,0,0,2" />
         <TextBox x:Name="CommentBox" AcceptsReturn="True" TextWrapping="Wrap"
                  MinHeight="60" MaxHeight="140"
-                 VerticalScrollBarVisibility="Auto" Margin="0,0,0,10" />
+                 VerticalScrollBarVisibility="Auto" Margin="0,0,0,10"
+                 ToolTip="Wird beim Upload zur Notiz am Gramps-Zitat (wie das Feld „Notiz“ im Gramps-Zitateditor)." />
         <DockPanel>
             <!-- copy = a SECOND citation of the same page with its own
                  comment (e.g. a different note for another person); the
@@ -26,7 +26,7 @@
                  both (page fact). -->
             <Button DockPanel.Dock="Left" Content="Als Kopie speichern"
                     Padding="14,4"
-                    ToolTip="Legt einen neuen Fund auf derselben Seite mit diesem Kommentar an — der bestehende Fund bleibt unverändert."
+                    ToolTip="Legt einen neuen Fund auf derselben Seite mit dieser Notiz an — der bestehende Fund bleibt unverändert."
                     Click="SaveAsCopy_Click" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="Übernehmen" IsDefault="True" Padding="14,4"

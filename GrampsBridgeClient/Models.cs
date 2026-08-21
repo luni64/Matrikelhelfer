@@ -209,7 +209,16 @@ public sealed class CreateEventBlock
     public string? Role { get; set; }
     public DateSpec? Date { get; set; }
     public string? PlaceHandle { get; set; }
+    public PlaceSpec? Place { get; set; }           // by name (match or create)
     public string? Description { get; set; }
+}
+
+/// <summary>Event place by NAME: the bridge reuses an existing place
+/// whose name matches (casefolded), else creates a bare place with
+/// this title in the same transaction.</summary>
+public sealed class PlaceSpec
+{
+    public required string Title { get; set; }
 }
 
 /// <summary>Mirrors the permalink onto the Internet tab of the involved
@@ -311,6 +320,7 @@ public sealed class BatchEventSpec
     public string? Family { get; set; }
     public string? Role { get; set; }
     public DateSpec? Date { get; set; }
+    public PlaceSpec? Place { get; set; }           // by name (match or create)
     public string? Description { get; set; }
 }
 

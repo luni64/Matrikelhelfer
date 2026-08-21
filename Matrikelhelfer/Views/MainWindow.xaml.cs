@@ -2,7 +2,6 @@ using System;
 using System.ComponentModel;
 using System.Reflection;
 using System.Windows;
-using System.Windows.Controls.Primitives;
 using System.Windows.Media.Animation;
 using MahApps.Metro.Controls;
 using Matrikelhelfer.ViewModels;
@@ -17,9 +16,9 @@ public partial class MainWindow : MetroWindow
 
     // Width the docked saved-finds tray gets when opened; the window
     // widens/narrows by the same amount so the main fields never resize.
-    // Mutable: the GridSplitter's drag result is remembered across toggles.
-    // Cards stack vertically, so the tray is much narrower than the old
-    // DataGrid was.
+    // Mutable: a manual window resize while open changes the (star-sized)
+    // tray, and that width is remembered across toggles. Cards stack
+    // vertically, so the tray is much narrower than the old DataGrid was.
     double _entriesPanelWidth = 340;
 
     public MainWindow()
@@ -68,32 +67,22 @@ public partial class MainWindow : MetroWindow
         }
         _entriesPanelShown = _viewModel.IsEntriesPanelOpen;
 
-        // The splitter column materializes/vanishes together with the panel,
-        // so its width must be part of the window delta on BOTH sides -
-        // otherwise every open/close cycle leaks its 8px into the window.
         if (_entriesPanelShown)
         {
             ContentColumn.Width = new GridLength(ContentColumn.ActualWidth);
             EntriesColumn.Width = new GridLength(1, GridUnitType.Star);
             EntriesPanel.Visibility = Visibility.Visible;
-            EntriesSplitter.Visibility = Visibility.Visible;
-            // Hand the fields' right margin to the splitter column so the
-            // whole gap between the panels is the drag handle.
-            ContentGrid.Margin = new Thickness(15, 15, 0, 15);
-            AnimateWindowWidth(Width + _entriesPanelWidth + EntriesSplitter.Width, onCompleted: null);
+            AnimateWindowWidth(Width + _entriesPanelWidth, onCompleted: null);
         }
         else
         {
-            // Keep a splitter-adjusted width for the next open.
+            // Keep a resize-adjusted width for the next open.
             _entriesPanelWidth = EntriesColumn.ActualWidth;
-            AnimateWindowWidth(Width - _entriesPanelWidth - EntriesSplitter.ActualWidth, onCompleted: () =>
+            AnimateWindowWidth(Width - _entriesPanelWidth, onCompleted: () =>
             {
                 EntriesPanel.Visibility = Visibility.Collapsed;
-                EntriesSplitter.Visibility = Visibility.Collapsed;
                 EntriesColumn.Width = new GridLength(0);
                 ContentColumn.Width = new GridLength(1, GridUnitType.Star);
-                // Restore the symmetric margin now that there's no splitter.
-                ContentGrid.Margin = new Thickness(15);
             });
         }
     }
@@ -114,15 +103,6 @@ public partial class MainWindow : MetroWindow
             onCompleted?.Invoke();
         };
         BeginAnimation(WidthProperty, anim);
-    }
-
-    // The splitter's drag pins BOTH neighbor columns to pixel widths -
-    // restore the panel column's star sizing (it must stay the flexible
-    // one while open) and remember the chosen width for the next toggle.
-    void EntriesSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
-    {
-        _entriesPanelWidth = EntriesColumn.ActualWidth;
-        EntriesColumn.Width = new GridLength(1, GridUnitType.Star);
     }
 
     // Selection alone only redisplays the entry (see MainViewModel).

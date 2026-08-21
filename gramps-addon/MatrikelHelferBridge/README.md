@@ -32,14 +32,14 @@ further objects).
 powershell -ExecutionPolicy Bypass -File gramps-addon\tests\run_tests.ps1
 ```
 
-Runs 51 integration tests headless inside the real Gramps runtime
+Runs 52 integration tests headless inside the real Gramps runtime
 (`grampsd.exe` CLI + a test tool plugin): auth/origin/content-type checks,
 person search and detail (incl. the per-event citations block),
 source/repository lookup, full capture, source reuse, idempotent replay,
 rollback on bad target, undo, attach-existing-citation, person creation
 (child/spouse/parent links, "@new" event owner, citation-less), and the
 capture-batch (full chain in one call, single undo, rollback,
-idempotent replay). Uses the
+idempotent replay, event place by name — reused casefolded or created). Uses the
 dedicated **MHBridgeTest** tree (wiped and reseeded every run — the tool
 refuses any other tree), a separate port (8811) and a temp discovery file,
 so a running production bridge is unaffected. Gramps GUI must be closed

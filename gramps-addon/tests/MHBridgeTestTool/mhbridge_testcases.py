@@ -855,3 +855,41 @@ class BridgeApiTests(unittest.TestCase):
         self.assertEqual(body, CTX["response_180"])  # cached, no re-write
         after = in_main(lambda: db().get_number_of_people())
         self.assertEqual(after, before)
+
+    def test_184_batch_event_place_by_name(self):
+        """Event place by NAME: created once, then REUSED (casefolded
+        match) instead of duplicated - church-book work cycles through
+        the same parish/village names."""
+        before = in_main(lambda: db().get_number_of_places())
+        status, body = post("/capture-batch", {
+            "request_id": "req-184",
+            "events": [
+                {"tmp": "evt:pl1", "type": "Baptism",
+                 "person": CTX["handles"]["hans"],
+                 "place": {"title": "Pollenfeld"},
+                 "date": {"type": "regular", "year": 1800}},
+            ],
+        })
+        self.assertEqual(status, 200, body)
+        e1 = body["created"]["events"]["evt:pl1"]["handle"]
+        status, body2 = post("/capture-batch", {
+            "request_id": "req-184b",
+            "events": [
+                {"tmp": "evt:pl2", "type": "Burial",
+                 "person": CTX["handles"]["hans"],
+                 "place": {"title": "pollenfeld"}},  # different case
+            ],
+        })
+        self.assertEqual(status, 200, body2)
+        e2 = body2["created"]["events"]["evt:pl2"]["handle"]
+
+        def check():
+            h1 = db().get_event_from_handle(e1).get_place_handle()
+            h2 = db().get_event_from_handle(e2).get_place_handle()
+            place = db().get_place_from_handle(h1)
+            return (h1, h2, place.get_name().get_value(),
+                    db().get_number_of_places())
+        h1, h2, name, places_after = in_main(check)
+        self.assertEqual(h1, h2)                 # reused, not duplicated
+        self.assertEqual(name, "Pollenfeld")
+        self.assertEqual(places_after, before + 1)

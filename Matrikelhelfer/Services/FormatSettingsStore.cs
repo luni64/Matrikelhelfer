@@ -7,15 +7,22 @@ using Matrikelhelfer.Models;
 
 namespace Matrikelhelfer.Services;
 
-// The full editable format state: the source-format and citation-format
+// The full editable settings state: the source-format and citation-format
 // lists plus which entry of each is active (rendered into the
-// Quellenangabe/Zitatangabe fields).
+// Quellenangabe/Zitatangabe fields), and the Gramps citation confidence.
 class FormatSettings
 {
     public required List<CitationStyle> SourceFormats { get; init; }
     public required CitationStyle SelectedSource { get; init; }
     public required List<CitationStyle> CitationFormats { get; init; }
     public required CitationStyle SelectedCitation { get; init; }
+
+    // Confidence for ALL citations the Gramps upload creates (bridge ids:
+    // very_low/low/normal/high/very_high). A GLOBAL setting on purpose:
+    // every citation here comes from the same kind of source (a church
+    // book), so a per-citation grade would be repetitive - outliers are
+    // adjusted in Gramps.
+    public string GrampsConfidence { get; init; } = "normal";
 }
 
 // Persists the user's format templates (and which ones are active) across
@@ -31,7 +38,13 @@ static class FormatSettingsStore
         public string? SelectedSourceFormat { get; set; }
         public List<CitationStyle> CitationFormats { get; set; } = new();
         public string? SelectedCitationFormat { get; set; }
+        public string? GrampsConfidence { get; set; }
     }
+
+    // The bridge's accepted confidence ids - an unknown stored value falls
+    // back to "normal" instead of failing every upload.
+    static readonly string[] ConfidenceIds =
+        ["very_low", "low", "normal", "high", "very_high"];
 
     static readonly string FilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -66,6 +79,8 @@ static class FormatSettingsStore
             CitationFormats = citations,
             SelectedCitation = citations.FirstOrDefault(f =>
                 f.Name == (payload?.SelectedCitationFormat ?? CitationStyleCatalog.DefaultCitationName)) ?? citations[0],
+            GrampsConfidence = ConfidenceIds.Contains(payload?.GrampsConfidence)
+                ? payload!.GrampsConfidence! : "normal",
         };
     }
 
@@ -80,6 +95,7 @@ static class FormatSettingsStore
                 SelectedSourceFormat = settings.SelectedSource.Name,
                 CitationFormats = settings.CitationFormats,
                 SelectedCitationFormat = settings.SelectedCitation.Name,
+                GrampsConfidence = settings.GrampsConfidence,
             };
             File.WriteAllText(FilePath, JsonSerializer.Serialize(
                 payload, new JsonSerializerOptions { WriteIndented = true }));

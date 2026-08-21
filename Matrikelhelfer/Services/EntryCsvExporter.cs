@@ -23,9 +23,11 @@ static class EntryCsvExporter
         var sb = new StringBuilder();
 
         // No Name column since the field was removed (2026-08) - old names
-        // were folded into the comment by the library migration.
+        // were folded into the note by the library migration. "Notiz"
+        // matches the field's UI label (renamed from Kommentar, after the
+        // Gramps field it becomes).
         AppendRow(sb,
-            "Gespeichert", "Kommentar",
+            "Gespeichert", "Notiz",
             "Land", "Bistum", "Pfarrei", "Buchtyp", "DatumVon", "DatumBis",
             "Signatur", "SignaturPfarrei", "SignaturBuch",
             "Seite", "Scan-Nr", "Scan-ID", "SeitenUrl", "BuchUrl", "BildUrl",

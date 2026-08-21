@@ -163,9 +163,24 @@
             </StackPanel>
         </Grid>
 
-        <StackPanel Grid.Row="1" Margin="0,12,0,0" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Padding="16,4" Content="OK" IsDefault="True" Click="Ok_Click" />
-            <Button Padding="16,4" Margin="8,0,0,0" Content="Abbrechen" IsCancel="True" />
-        </StackPanel>
+        <DockPanel Grid.Row="1" Margin="0,12,0,0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Padding="16,4" Content="OK" IsDefault="True" Click="Ok_Click" />
+                <Button Padding="16,4" Margin="8,0,0,0" Content="Abbrechen" IsCancel="True" />
+            </StackPanel>
+            <!-- One GLOBAL confidence for every citation the Gramps upload
+                 creates - all sources here are church books, so grading per
+                 citation would be repetitive; outliers get adjusted in
+                 Gramps itself. -->
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="Vertrauensgrad neuer Gramps-Zitate:"
+                           VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox MinWidth="130"
+                          ItemsSource="{Binding ConfidenceChoices}"
+                          DisplayMemberPath="Label"
+                          SelectedItem="{Binding SelectedConfidence}"
+                          ToolTip="Gilt für alle Zitate, die beim Upload nach Gramps angelegt werden (wie das Feld „Vertrauensgrad“ im Gramps-Zitateditor). Einzelne Zitate lassen sich in Gramps nachträglich anders einstufen." />
+            </StackPanel>
+        </DockPanel>
     </Grid>
 </mah:MetroWindow>

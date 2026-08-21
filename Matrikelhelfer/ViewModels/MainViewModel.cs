@@ -426,6 +426,7 @@ class MainViewModel : INotifyPropertyChanged
         _citationFormats = formats.CitationFormats;
         _selectedSourceFormat = formats.SelectedSource;
         _selectedCitationFormat = formats.SelectedCitation;
+        _grampsConfidence = formats.GrampsConfidence;
 
         // Loads library.json, migrating a pre-2.0 entries.json on first run.
         // A parse failure must NOT degrade to "start empty" - see
@@ -482,7 +483,10 @@ class MainViewModel : INotifyPropertyChanged
         AdoptIntoGrampsCommand = new RelayCommand(AdoptSelectedIntoGramps,
             () => SelectedSavedEntry != null);
         Gramps = new GrampsViewModel(_gramps, SavedEntries, s => StatusText = s,
-                                     EditCitation);
+                                     EditCitation)
+        {
+            CitationConfidence = _grampsConfidence,
+        };
         ExportEntriesCommand = new RelayCommand(ExportEntries, () => SavedEntries.Count > 0);
         ExportBibTexCommand = new RelayCommand(ExportBibTex, () => SavedEntries.Count > 0);
         ClearAllEntriesCommand = new RelayCommand(ClearAllEntries, () => SavedEntries.Count > 0);
@@ -550,7 +554,7 @@ class MainViewModel : INotifyPropertyChanged
         {
             _boundEntry = null;
             // Drop the selection AND wipe the fields: otherwise the deleted
-            // entry's notes stay in Kommentar/Seite with no matching
+            // entry's notes stay in Notiz/Seite with no matching
             // saved entry, so the next list selection would pop the
             // discard-unsaved warning. Deleting a DIFFERENT row (via its
             // trash button) leaves the selection and display untouched.
@@ -648,7 +652,7 @@ class MainViewModel : INotifyPropertyChanged
     }
 
     // A new read wipes the display and the annotation fields - if the user
-    // typed something (Kommentar/Seite) that is not saved as an entry
+    // typed something (Notiz/Seite) that is not saved as an entry
     // yet, ask before discarding it.
     bool ConfirmDiscardUnsaved()
     {
@@ -657,7 +661,7 @@ class MainViewModel : INotifyPropertyChanged
             return true;
         }
         return MessageBox.Show(
-            "Die Eingaben (Kommentar/Seite) wurden nicht gespeichert und gehen verloren. Fortfahren?",
+            "Die Eingaben (Notiz/Seite) wurden nicht gespeichert und gehen verloren. Fortfahren?",
             "Ungespeicherte Eingaben",
             MessageBoxButton.OKCancel, MessageBoxImage.Warning) == MessageBoxResult.OK;
     }
@@ -895,14 +899,14 @@ class MainViewModel : INotifyPropertyChanged
             if (FindingWithComment(page, comment) is { } twin)
             {
                 result = twin;
-                StatusText = "Fund mit diesem Kommentar existiert bereits.";
+                StatusText = "Fund mit dieser Notiz existiert bereits.";
             }
             else
             {
                 result = new SavedEntry(
                     new Finding(Guid.NewGuid(), page.Id, DateTime.Now, comment), page);
                 SavedEntries.Add(result);
-                StatusText = "Kopie mit eigenem Kommentar angelegt.";
+                StatusText = "Kopie mit eigener Notiz angelegt.";
             }
         }
         else
@@ -1234,6 +1238,8 @@ class MainViewModel : INotifyPropertyChanged
         var result = settings.Result;
         SourceFormats = result.SourceFormats;
         CitationFormats = result.CitationFormats;
+        _grampsConfidence = result.GrampsConfidence;
+        Gramps.CitationConfidence = _grampsConfidence;
         // The selection setters re-render their field and save - but they
         // no-op when the active format came back unchanged, so save once
         // more to also catch list-only edits.
@@ -1242,12 +1248,17 @@ class MainViewModel : INotifyPropertyChanged
         SaveFormats();
     }
 
+    // Confidence for all citations the Gramps upload creates (global
+    // setting - see FormatSettings.GrampsConfidence).
+    string _grampsConfidence;
+
     FormatSettings CurrentFormatSettings() => new()
     {
         SourceFormats = _sourceFormats.ToList(),
         SelectedSource = _selectedSourceFormat,
         CitationFormats = _citationFormats.ToList(),
         SelectedCitation = _selectedCitationFormat,
+        GrampsConfidence = _grampsConfidence,
     };
 
     void SaveFormats() => FormatSettingsStore.Save(CurrentFormatSettings());

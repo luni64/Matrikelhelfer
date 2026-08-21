@@ -76,6 +76,8 @@ sealed class GrampsViewModel : GrampsObservable
         RemoveEventCommand = new RelayCommand<FactRowVM>(f => { if (f is not null) RemovePendingEvent(f); });
         EditCitationCommand = new RelayCommand<SourceCardVM>(c => { if (c is not null) EditFindingCitation(c); });
         UnadoptCommand = new RelayCommand<SourceCardVM>(c => { if (c is not null) UnadoptFinding(c); });
+        ShowChangesCommand = new RelayCommand(ShowChanges, () => Changes.Count > 0);
+        Changes.CollectionChanged += (_, _) => OnChanged(nameof(ChangesSummary));
     }
 
     void Status(string text) => _setStatus(text);
@@ -1238,7 +1240,14 @@ sealed class GrampsViewModel : GrampsObservable
         {
             return;
         }
-        var dialog = new EventTypeDialog(EventTypeChoices, _lastEventType, "")
+        // Place preset: the active finding's parish - in church-book work
+        // the event place usually IS the parish village. Freely editable.
+        string placePreset =
+            ActiveFindingCard()?.FindingId is { } findingId
+            && FindLibraryEntry(findingId)?.Info.Pfarrei is { Length: > 0 } parish
+                ? parish : "";
+        var dialog = new EventTypeDialog(EventTypeChoices, _lastEventType, "",
+                                         place: placePreset)
         {
             Owner = System.Windows.Application.Current.MainWindow,
         };
@@ -1252,11 +1261,13 @@ sealed class GrampsViewModel : GrampsObservable
         {
             date.Type = dialog.DateType;
         }
-        AddPendingEvent(choice, dialog.Description, date, dialog.DateDisplay);
+        AddPendingEvent(choice, dialog.Description, date, dialog.DateDisplay,
+                        dialog.Place);
     }
 
     void AddPendingEvent(EventTypeChoice eventType, string description,
-                         DateSpec? eventDate, string eventDateText)
+                         DateSpec? eventDate, string eventDateText,
+                         string place)
     {
         if (_centerNode is null)
         {
@@ -1291,6 +1302,7 @@ sealed class GrampsViewModel : GrampsObservable
                 EventTypeLabel = eventType.Label,
                 EventDate = eventDate,
                 EventDateText = eventDateText,
+                EventPlace = NullIfEmpty(place),
                 OwnerKind = family.IsVirtual ? "pending-family" : "family",
                 OwnerHandle = family.Id,
                 EventDescription = NullIfEmpty(description),
@@ -1318,6 +1330,7 @@ sealed class GrampsViewModel : GrampsObservable
                 EventTypeLabel = eventType.Label,
                 EventDate = eventDate,
                 EventDateText = eventDateText,
+                EventPlace = NullIfEmpty(place),
                 OwnerKind = "pending-person",
                 OwnerHandle = personEntry.Id,
                 EventDescription = NullIfEmpty(description),
@@ -1338,6 +1351,7 @@ sealed class GrampsViewModel : GrampsObservable
             EventTypeLabel = eventType.Label,
             EventDate = eventDate,
             EventDateText = eventDateText,
+            EventPlace = NullIfEmpty(place),
             OwnerKind = "person",
             OwnerHandle = center.Id,
             EventDescription = NullIfEmpty(description),
@@ -1375,6 +1389,7 @@ sealed class GrampsViewModel : GrampsObservable
                                              c => c.Xml == entry.EventType),
                                          dateText,
                                          entry.EventDescription ?? "",
+                                         entry.EventPlace ?? "",
                                          dateType, edit: true)
         {
             Owner = System.Windows.Application.Current.MainWindow,
@@ -1392,6 +1407,7 @@ sealed class GrampsViewModel : GrampsObservable
         entry.EventTypeLabel = choice.Label;
         entry.EventDate = date;
         entry.EventDateText = dialog.DateDisplay;
+        entry.EventPlace = NullIfEmpty(dialog.Place);
         entry.EventDescription = NullIfEmpty(dialog.Description);
         RefreshPendingTargetLabels(entry);
         AfterChangesMutation($"Ereignis {choice.Label} geändert");
@@ -1448,6 +1464,34 @@ sealed class GrampsViewModel : GrampsObservable
     public ICommand SendCommand { get; }
     public ICommand DeleteEntryCommand { get; }
     public ICommand DeleteGroupCommand { get; }
+    public ICommand ShowChangesCommand { get; }
+
+    /// <summary>The tab's summary row ("3 Änderungen"); the full list
+    /// lives in ChangeListDialog. Notified via Changes.CollectionChanged
+    /// (wired in the ctor), so add/remove/clear all update it.</summary>
+    public string ChangesSummary => Changes.Count switch
+    {
+        0 => "Keine Änderungen",
+        1 => "1 Änderung",
+        var n => $"{n} Änderungen",
+    };
+
+    /// <summary>Opens the change list as its own window. The dialog
+    /// shares THIS view model, so deletes and the send command inside
+    /// it are the same objects, and the list stays live while open.
+    /// The deletes stay in the dialog deliberately: it is the only
+    /// GLOBAL view (in-place removal requires the owner to be
+    /// centered), group delete has no in-place equivalent, and the
+    /// blocked-upload recovery ("betroffene Änderungen bitte
+    /// entfernen") happens here.</summary>
+    void ShowChanges()
+    {
+        var dialog = new ChangeListDialog(this)
+        {
+            Owner = System.Windows.Application.Current.MainWindow,
+        };
+        dialog.ShowDialog();
+    }
 
     void DeleteEntry(GrampsChangeEntry entry)
     {
@@ -1579,12 +1623,19 @@ sealed class GrampsViewModel : GrampsObservable
 
     // ---- upload (one capture-batch = ONE transaction) ----------------
 
+    /// <summary>Confidence for every citation the upload creates. A
+    /// GLOBAL setting (Einstellungen dialog, persisted in formats.json):
+    /// all sources here are church books, so a per-citation grade would
+    /// be repetitive - outliers are adjusted in Gramps.</summary>
+    public string CitationConfidence { get; set; } = "normal";
+
     /// <summary>Repository/source/citation blocks for a finding,
     /// resolved from the CURRENT library state (a corrected Seite still
     /// reaches Gramps). Fixed derivations for now: title/abbreviation =
     /// CitationTitle, source key = its slug, publication = Bistum.</summary>
     static (RepositoryBlock Repo, SourceBlock Source, CitationBlock Citation,
-            PersonUrlSpec? PersonUrl) MapFinding(LibraryEntry entry)
+            PersonUrlSpec? PersonUrl) MapFinding(LibraryEntry entry,
+                                                 string confidence)
     {
         var info = entry.Page.Info;
         var (repoName, repoUrl) = RepoOf(info);
@@ -1621,7 +1672,7 @@ sealed class GrampsViewModel : GrampsObservable
         var citation = new CitationBlock
         {
             Page = NullIfEmpty(info.PageDescription),
-            Confidence = "normal",
+            Confidence = confidence,
             Attributes = string.IsNullOrWhiteSpace(info.EffectivePageUrl)
                 ? null
                 : [new AttributeKV("MH_Permalink", info.EffectivePageUrl)],
@@ -1718,6 +1769,8 @@ sealed class GrampsViewModel : GrampsObservable
                 Person = isPerson ? ownerRef : null,
                 Family = isPerson ? null : ownerRef,
                 Date = entry.EventDate,
+                Place = entry.EventPlace is { } place
+                    ? new PlaceSpec { Title = place } : null,
                 Description = entry.EventDescription,
             });
         }
@@ -1733,7 +1786,8 @@ sealed class GrampsViewModel : GrampsObservable
                 ?? throw new InvalidOperationException(
                     "Ein zugeordneter Fund wurde inzwischen gelöscht – " +
                     "betroffene Änderungen bitte entfernen.");
-            var (repo, source, citation, personUrl) = MapFinding(libraryEntry.Entry);
+            var (repo, source, citation, personUrl) =
+                MapFinding(libraryEntry.Entry, CitationConfidence);
             var targets = new List<BatchTargetRef>();
             var seen = new HashSet<(string, string)>();
             foreach (var entry in group)
